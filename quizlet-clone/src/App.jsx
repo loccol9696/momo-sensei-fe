@@ -8,6 +8,7 @@ import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { AuthProvider } from "./context/AuthContext";
 import Module from "./components/Module";
+import Dashboard from "./components/Dashboard";
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
 
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/folders" element={<Folders />} />
           <Route path="/folders/:id" element={<FolderDetail />} />
           <Route path="/modules/:id" element={<Module />} />

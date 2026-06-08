@@ -25,7 +25,7 @@ const Home = () => {
 
   const handleStartLearning = () => {
     if (isLoggedIn) {
-      navigate("/folders");
+      navigate("/dashboard");
     } else {
       setIsSignupOpen(true);
     }

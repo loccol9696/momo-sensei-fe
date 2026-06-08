@@ -53,7 +53,7 @@ const Folders = () => {
       );
 
       if (response.data.success) {
-        toast.success("Tạo thư mục thành công! 🌸");
+        toast.success("Tạo thư mục thành công!");
         setNewFolderName("");
         setIsCreateModalOpen(false);
         fetchFolders();
@@ -111,7 +111,7 @@ const Folders = () => {
         <div className="empty-list">
           {searchQuery
             ? "Không tìm thấy thư mục nào phù hợp."
-            : "Chưa có thư mục nào. Hãy tạo mới nhé! 🌸"}
+            : "Chưa có thư mục nào. Hãy tạo mới nhé!"}
         </div>
       )}
 

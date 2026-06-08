@@ -122,13 +122,15 @@ const FolderDetail = () => {
 
   return (
     <div className="folder-detail-container">
+      {/* NÚT QUAY LẠI VỀ FOLDERS */}
+      <div className="folder-detail-back-wrapper">
+        <button className="btn-back" onClick={() => navigate("/folders")}>
+          ← Quay lại
+        </button>
+      </div>
+
       {/* THANH ACTION BAR (Chứa Quay lại + Tìm kiếm + Tạo mới ngang hàng) */}
       <div className="module-action-bar">
-        {/* Bên trái: Nút quay lại */}
-        <button className="btn-back" onClick={() => navigate("/folders")}>
-          ⬅ Quay lại
-        </button>
-
         {/* Bên phải: Tìm kiếm và Tạo học phần */}
         <div className="action-right">
           <input

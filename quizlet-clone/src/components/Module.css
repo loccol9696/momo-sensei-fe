@@ -1,32 +1,48 @@
 .module-detail-container {
-  padding: 40px;
-  max-width: 1000px;
+  width: 100%;
+  padding: 20px;
+  max-width: 1040px;
   margin: 0 auto;
+  position: relative;
+  box-sizing: border-box;
 }
+
+.module-back-wrapper {
+  position: absolute;
+  top: 30px;
+  left: 20px;
+  z-index: 10;
+}
+
 .module-header-container {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: start;
+  text-align: center;
+  margin-top: 5px;
   margin-bottom: 40px;
+  width: 100%;
 }
+
 .btn-back {
-  padding: 10px 20px;
+  padding: 8px 16px;
   border-radius: 10px;
   border: 2px solid #ffe0ea;
   background: white;
   color: #8c7a91;
   font-weight: bold;
+  font-size: 14px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  transition: all 0.2s ease;
 }
+
 .btn-back:hover {
   background: #fff0f5;
   color: #ff6b9e;
   border-color: #ff89a9;
-  transform: translateX(-5px);
+  transform: translateX(-4px);
 }
+
 .module-header-info {
   text-align: center;
 }
@@ -119,21 +135,45 @@
 
 .cards-list-section {
   margin-top: 50px;
+  width: 100%;
 }
 .cards-list-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  width: 100%;
+}
+.cards-list-header h3 {
+  color: #5a4b5e;
+  font-size: 20px;
+  font-weight: 800;
+  margin: 0;
 }
 .btn-add-card {
   padding: 10px 20px;
-  border-radius: 10px;
+  border-radius: 12px;
   border: none;
   background: linear-gradient(135deg, #ff89a9, #ff6b9e);
   color: white;
   font-weight: bold;
   cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.btn-add-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(255, 107, 158, 0.25);
+}
+.empty-cards-placeholder {
+  text-align: center;
+  padding: 60px 20px;
+  background: #fffafc;
+  border: 2px dashed #ffe0ea;
+  border-radius: 20px;
+  color: #8c7a91;
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 40px;
 }
 .card-list-item {
   display: flex;
@@ -223,4 +263,16 @@
   color: white;
   font-weight: bold;
   cursor: pointer;
+}
+
+/* Responsive để co giãn tốt trên màn hình nhỏ */
+@media (max-width: 992px) {
+  .module-detail-container {
+    padding: 80px 20px 40px 20px;
+  }
+
+  .module-back-wrapper {
+    top: 20px;
+    left: 20px;
+  }
 }

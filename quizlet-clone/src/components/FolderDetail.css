@@ -1,8 +1,18 @@
 /* --- BỐ CỤC CHUNG --- */
 .folder-detail-container {
-  padding: 40px;
-  max-width: 1400px;
+  width: 100%;
+  padding: 20px;
+  max-width: 1040px;
   margin: 0 auto;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.folder-detail-back-wrapper {
+  position: absolute;
+  top: 30px;
+  left: 20px;
+  z-index: 10;
 }
 
 .loading-text {
@@ -16,9 +26,10 @@
 /* --- THANH ACTION BAR (QUAY LẠI - TÌM KIẾM - TẠO MỚI) --- */
 .module-action-bar {
   display: flex;
-  justify-content: center;
-  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 5px;
   margin-bottom: 40px;
+  position: relative;
 }
 
 .action-right {
@@ -28,16 +39,17 @@
 }
 
 .btn-back {
-  padding: 12px 20px; /* Đổi padding cho bằng chiều cao với ô tìm kiếm */
-  border-radius: 12px;
+  padding: 8px 16px;
+  border-radius: 10px;
   border: 2px solid #ffe0ea;
   background: white;
   color: #8c7a91;
   font-weight: bold;
+  font-size: 14px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   transition: all 0.2s ease;
 }
 
@@ -45,7 +57,7 @@
   background: #fff0f5;
   color: #ff6b9e;
   border-color: #ff89a9;
-  transform: translateX(-5px);
+  transform: translateX(-4px);
 }
 
 .module-search-input {
@@ -272,13 +284,46 @@
 
 /* --- RESPONSIVE --- */
 @media (max-width: 992px) {
+  .folder-detail-container {
+    padding: 80px 20px 40px 20px;
+  }
+
+  .folder-detail-back-wrapper {
+    top: 20px;
+    left: 20px;
+  }
+
+  .module-action-bar {
+    justify-content: center;
+    margin-top: 20px;
+  }
+
   .modules-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 650px) {
+  .action-right {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .module-search-input {
+    width: 100%;
+  }
+
+  .btn-create-module {
+    width: 100%;
+  }
+
   .modules-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .modules-grid {
+    grid-template-columns: 1fr;
   }
 }

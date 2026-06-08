@@ -98,18 +98,19 @@ const Module = () => {
 
   return (
     <div className="module-detail-container">
+      {/* NÚT QUAY LẠI */}
+      <div className="module-back-wrapper">
+        <button className="btn-back" onClick={() => navigate(-1)}>
+          ← Quay lại
+        </button>
+      </div>
+
       {/* HEADER GỌN */}
       <div className="module-header-container">
-        <div className="header-left">
-          <button className="btn-back" onClick={() => navigate(-1)}>
-            ⬅ Quay lại
-          </button>
-        </div>
         <div className="module-header-info">
           <h2 className="module-title">{moduleData.name}</h2>
           <p className="module-desc">{moduleData.description}</p>
         </div>
-        <div className="header-right"></div>
       </div>
 
       {/* FLASHCARD */}

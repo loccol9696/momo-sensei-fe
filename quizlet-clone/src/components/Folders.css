@@ -1,15 +1,54 @@
 .folders-container {
-  padding: 40px;
-  max-width: 1400px;
+  width: 100%;
+  padding: 20px;
+  max-width: 1040px;
   margin: 0 auto;
   text-align: center;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.folders-back-wrapper {
+  position: absolute;
+  top: 30px;
+  left: 20px;
+  z-index: 10;
+}
+
+.btn-back {
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 2px solid #ffe0ea;
+  background: white;
+  color: #8c7a91;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-back:hover {
+  background: #fff0f5;
+  color: #ff6b9e;
+  border-color: #ff89a9;
+  transform: translateX(-4px);
 }
 
 .action-bar {
   display: flex;
-  justify-content: center;
-  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 5px;
   margin-bottom: 40px;
+  position: relative;
+}
+
+.action-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .search-input {
@@ -201,14 +240,47 @@
 }
 
 /* Responsive để co giãn tốt trên màn hình nhỏ */
-@media (max-width: 1200px) {
+@media (max-width: 992px) {
+  .folders-container {
+    padding: 80px 20px 40px 20px;
+  }
+
+  .folders-back-wrapper {
+    top: 20px;
+    left: 20px;
+  }
+
+  .action-bar {
+    justify-content: center;
+    margin-top: 20px;
+  }
+
   .folders-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
-@media (max-width: 800px) {
+@media (max-width: 650px) {
+  .action-right {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .btn-create-folder {
+    width: 100%;
+  }
+
   .folders-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .folders-grid {
+    grid-template-columns: 1fr;
   }
 }

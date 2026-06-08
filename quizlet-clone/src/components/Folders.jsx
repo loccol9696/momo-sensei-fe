@@ -67,13 +67,15 @@ const Folders = () => {
 
   return (
     <div className="folders-container">
+      {/* NÚT QUAY LẠI VỀ DASHBOARD */}
+      <div className="folders-back-wrapper">
+        <button className="btn-back" onClick={() => navigate("/dashboard")}>
+          ← Quay lại
+        </button>
+      </div>
+
       {/* THANH ACTION BAR MỚI */}
       <div className="action-bar">
-        {/* Nút quay lại về trang chủ */}
-        <button className="btn-back" onClick={() => navigate("/")}>
-          ⬅ Quay lại
-        </button>
-
         {/* Cụm Tìm kiếm & Tạo mới ở bên phải */}
         <div className="action-right">
           <input

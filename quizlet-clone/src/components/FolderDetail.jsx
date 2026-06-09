@@ -166,7 +166,7 @@ const FolderDetail = () => {
               <div className="module-icon">📝</div>
               <div className="module-info">
                 <h4>{mod.name}</h4>
-                <p>{mod.totalTerms || 0} thuật ngữ</p>
+                <p>{mod.totalCards || mod.totalTerms || 0} thuật ngữ</p>
               </div>
             </div>
           ))}

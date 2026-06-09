@@ -10,7 +10,7 @@ const Dashboard = () => {
     if (topic === "folders") {
       navigate("/folders");
     } else {
-      toast.info("Tính năng này đang được phát triển, cậu chờ chút nhé! 🌸");
+      toast.info("Tính năng này đang được phát triển, cậu chờ chút nhé!");
     }
   };
 
@@ -21,7 +21,7 @@ const Dashboard = () => {
       title: "Thư mục học tập",
       description: "Tự tạo, quản lý và ôn tập các từ vựng theo chủ đề của riêng cậu.",
       active: true,
-      badge: "Học ngay 🌸",
+      badge: "Học ngay",
     },
     {
       id: "cadao",

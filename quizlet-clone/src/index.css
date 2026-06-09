@@ -19,3 +19,8 @@ body,
   display: flex;
   flex-direction: column;
 }
+
+/* Đẩy các thông báo toast xuống dưới header để tránh bị che khuất */
+.Toastify__toast-container {
+  top: 90px !important;
+}

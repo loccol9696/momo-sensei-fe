@@ -105,7 +105,7 @@ const FolderDetail = () => {
       );
 
       if (response.data.success) {
-        toast.success("Tạo học phần thành công! 🌸");
+        toast.success("Tạo học phần thành công!");
         resetForm();
         setIsCreateModalOpen(false);
         fetchModules();
@@ -175,7 +175,7 @@ const FolderDetail = () => {
         <div className="empty-modules">
           {searchQuery
             ? "Không tìm thấy học phần nào."
-            : "Chưa có học phần nào. Tạo mới nhé! 🌸"}
+            : "Chưa có học phần nào. Tạo mới nhé!"}
         </div>
       )}
 

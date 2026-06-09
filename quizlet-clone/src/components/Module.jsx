@@ -84,6 +84,18 @@ const Module = () => {
   const [gameWrongElements, setGameWrongElements] = useState([]); // elements showing red incorrect state
   const [gameTime, setGameTime] = useState(0); // in seconds
   const [gameChecking, setGameChecking] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  // Trạng thái Trò chơi Trọng lực (Gravity Game)
+  const [gravityStep, setGravityStep] = useState("playing"); // "playing" | "summary"
+  const [gravityScore, setGravityScore] = useState(0);
+  const [gravityLives, setGravityLives] = useState(3);
+  const [gravityWords, setGravityWords] = useState([]);
+  const [gravityInput, setGravityInput] = useState("");
+  const [gravityInputWrong, setGravityInputWrong] = useState(false);
+  const [gravityShowType, setGravityShowType] = useState("definition"); // "definition" | "term"
+  const [gravityFlashRed, setGravityFlashRed] = useState(false);
+  const [gravitySpawnedCardIds, setGravitySpawnedCardIds] = useState([]);
 
   // Game Timer Hook
   useEffect(() => {
@@ -97,6 +109,8 @@ const Module = () => {
       if (timerId) clearInterval(timerId);
     };
   }, [isPlayingGame, gameStep]);
+
+
 
   const activeCards = moduleData?.cards?.filter(card => !card.deleted && !card.isDeleted) || [];
   const starredCards = activeCards.filter(card => card.isStarred || card.starred) || [];
@@ -175,6 +189,278 @@ const Module = () => {
           setSlideState("none");
         }, 250);
       }, 200);
+    }
+  };
+
+  const toggleFullScreen = () => {
+    setIsFullScreen(!isFullScreen);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (isStudying || isPlayingGame) return;
+
+      const activeEl = document.activeElement?.tagName;
+      if (activeEl === "INPUT" || activeEl === "TEXTAREA" || document.activeElement?.isContentEditable) {
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        handleFlip();
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        if (currentIndex < studyCards.length - 1) {
+          handleNext();
+        }
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        if (currentIndex > 0) {
+          handlePrev();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [currentIndex, studyCards.length, isFlipped, slideState, isStudying, isPlayingGame]);
+
+  // Refs for Gravity Game loop to prevent stale states
+  const requestRef = React.useRef(null);
+  const previousTimeRef = React.useRef(null);
+  const gravityWordsRef = React.useRef([]);
+  const gravityLivesRef = React.useRef(3);
+  const gravityScoreRef = React.useRef(0);
+  const boardHeight = 440; // board play area height in px
+
+  // Sync refs with states
+  useEffect(() => {
+    gravityWordsRef.current = gravityWords;
+  }, [gravityWords]);
+
+  useEffect(() => {
+    gravityLivesRef.current = gravityLives;
+  }, [gravityLives]);
+
+  useEffect(() => {
+    gravityScoreRef.current = gravityScore;
+  }, [gravityScore]);
+
+  // Main game tick loop at 60fps
+  const gravityTick = (time) => {
+    if (previousTimeRef.current !== undefined) {
+      const deltaTime = (time - previousTimeRef.current) / 1000; // in seconds
+
+      setGravityWords((prevWords) => {
+        let lifeLost = false;
+        const updated = prevWords
+          .map((w) => {
+            if (w.isFading) return w;
+            // Gradually speed up based on current score
+            const currentSpeed = w.speed * (1 + gravityScoreRef.current * 0.02);
+            const newY = w.y + currentSpeed * deltaTime;
+            return { ...w, y: newY };
+          })
+          .filter((w) => {
+            // Check boundary hit
+            if (w.y >= boardHeight - 40 && !w.isFading) {
+              lifeLost = true;
+              return false; // remove
+            }
+            return true;
+          });
+
+        if (lifeLost) {
+          setGravityLives((prevLives) => {
+            const nextLives = prevLives - 1;
+            if (nextLives <= 0) {
+              setGravityStep("summary");
+              if (requestRef.current) {
+                cancelAnimationFrame(requestRef.current);
+                requestRef.current = null;
+              }
+            }
+            return nextLives;
+          });
+          setGravityFlashRed(true);
+          setTimeout(() => setGravityFlashRed(false), 200);
+        }
+
+        return updated;
+      });
+    }
+
+    previousTimeRef.current = time;
+    if (gravityLivesRef.current > 0 && isPlayingGame && gameMode === "gravity" && gravityStep === "playing") {
+      requestRef.current = requestAnimationFrame(gravityTick);
+    }
+  };
+
+  // Trigger animation loop
+  useEffect(() => {
+    if (isPlayingGame && gameMode === "gravity" && gravityStep === "playing" && gravityLives > 0) {
+      previousTimeRef.current = performance.now();
+      requestRef.current = requestAnimationFrame(gravityTick);
+    }
+
+    return () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+    };
+  }, [isPlayingGame, gameMode, gravityStep, gravityLives]);
+
+  // Spawning timer loop based on score difficulty
+  useEffect(() => {
+    let spawnIntervalId = null;
+    if (isPlayingGame && gameMode === "gravity" && gravityStep === "playing" && gravityLives > 0) {
+      const spawnInterval = Math.max(1200, 3000 - gravityScore * 100);
+      spawnIntervalId = setInterval(() => {
+        spawnNewWord();
+      }, spawnInterval);
+    }
+
+    return () => {
+      if (spawnIntervalId) clearInterval(spawnIntervalId);
+    };
+  }, [isPlayingGame, gameMode, gravityStep, gravityLives, gravityScore, gravitySpawnedCardIds]);
+
+  // Check if gravity game has finished (all questions spawned and all cleared from screen)
+  useEffect(() => {
+    if (
+      isPlayingGame &&
+      gameMode === "gravity" &&
+      gravityStep === "playing" &&
+      studyQuestions.length > 0 &&
+      gravitySpawnedCardIds.length >= studyQuestions.length &&
+      gravityWords.length === 0
+    ) {
+      setGravityStep("summary");
+    }
+  }, [gravityWords, gravitySpawnedCardIds, studyQuestions, isPlayingGame, gameMode, gravityStep]);
+
+  const createFallingWordObject = (questionObj) => {
+    const card = activeCards.find((c) => c.id === questionObj.cardId);
+    const textToShow = gravityShowType === "term" ? card?.term : card?.definition;
+    const answerToType = gravityShowType === "term" ? card?.definition : card?.term;
+
+    return {
+      id: `${questionObj.cardId}-${Date.now()}-${Math.random()}`,
+      cardId: questionObj.cardId,
+      text: textToShow || "Question",
+      answer: answerToType || "Answer",
+      x: 5 + Math.random() * 70, // random x between 5% and 75%
+      y: -20, // start just offscreen
+      speed: 40 + Math.random() * 20, // pixels per second
+      isFading: false
+    };
+  };
+
+  const spawnNewWord = () => {
+    if (studyQuestions.length === 0) return;
+
+    if (gravitySpawnedCardIds.length >= studyQuestions.length) return;
+
+    const spawnedSet = new Set(gravitySpawnedCardIds);
+    const availableQuestions = studyQuestions.filter((q) => !spawnedSet.has(q.cardId));
+
+    if (availableQuestions.length === 0) return;
+
+    const randomQ = availableQuestions[Math.floor(Math.random() * availableQuestions.length)];
+    const newWordObj = createFallingWordObject(randomQ);
+
+    setGravityWords((prevWords) => [...prevWords, newWordObj]);
+    setGravitySpawnedCardIds((prevSpawned) => [...prevSpawned, randomQ.cardId]);
+  };
+
+  const handleStartGravityGame = async () => {
+    setLoadingGame(true);
+    setGravityScore(0);
+    setGravityLives(3);
+    setGravityWords([]);
+    setGravityInput("");
+    setGravityStep("playing");
+    setGravitySpawnedCardIds([]);
+
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(
+        `http://localhost:8080/api/study/write/${id}?isStarred=${gameStarredOnly}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.data.success) {
+        const questionsList = response.data.data;
+        if (questionsList.length === 0) {
+          toast.warning("Học phần không có câu hỏi phù hợp để tạo trò chơi!");
+          return;
+        }
+        setStudyQuestions(questionsList);
+
+        // Spawn first word immediately
+        const firstQ = questionsList[Math.floor(Math.random() * questionsList.length)];
+        const card = activeCards.find((c) => c.id === firstQ.cardId);
+        const textToShow = gravityShowType === "term" ? card?.term : card?.definition;
+        const answerToType = gravityShowType === "term" ? card?.definition : card?.term;
+
+        setGravityWords([{
+          id: `${firstQ.cardId}-${Date.now()}`,
+          cardId: firstQ.cardId,
+          text: textToShow || "Question",
+          answer: answerToType || "Answer",
+          x: 10 + Math.random() * 60,
+          y: -10,
+          speed: 50,
+          isFading: false
+        }]);
+        setGravitySpawnedCardIds([firstQ.cardId]);
+
+        setGameMode("gravity");
+        setIsPlayingGame(true);
+        setIsGameConfigOpen(false);
+      }
+    } catch (err) {
+      toast.error("Không thể tải câu hỏi Trọng lực!");
+    } finally {
+      setLoadingGame(false);
+    }
+  };
+
+  const handleGravitySubmit = (e) => {
+    e.preventDefault();
+    if (!gravityInput.trim()) return;
+
+    const typedAnswer = gravityInput.trim().toLowerCase();
+
+    const normalizeText = (text) => {
+      if (!text) return "";
+      return text.toLowerCase().trim();
+    };
+
+    // Find match synchronously to avoid React state updater async race conditions
+    const matchedWord = gravityWords.find(
+      (w) => normalizeText(w.answer) === typedAnswer && !w.isFading
+    );
+
+    if (matchedWord) {
+      setGravityWords((prevWords) =>
+        prevWords.map((w) => (w.id === matchedWord.id ? { ...w, isFading: true } : w))
+      );
+
+      setTimeout(() => {
+        setGravityWords((words) => words.filter((w) => w.id !== matchedWord.id));
+      }, 400);
+
+      setGravityScore((prev) => prev + 100);
+      setGravityInput("");
+      toast.dismiss();
+    } else {
+      setGravityInputWrong(true);
+      setGravityInput("");
+      setTimeout(() => setGravityInputWrong(false), 500);
     }
   };
 
@@ -331,6 +617,11 @@ const Module = () => {
   };
 
   const handleStartGame = async () => {
+    if (gameMode === "gravity") {
+      handleStartGravityGame();
+      return;
+    }
+
     const currentTotalCount = gameStarredOnly ? starredCards.length : activeCards.length;
     if (gameStarredOnly && starredCards.length === 0) {
       return toast.warning("Học phần này chưa có thẻ nào được gắn sao!");
@@ -427,7 +718,7 @@ const Module = () => {
 
   const handleSelectPiece = async (el) => {
     if (gameChecking || loadingGame) return;
-    
+
     // Nếu thẻ này đã ghép cặp xong, bỏ qua
     if (gameMatchedCardIds.includes(el.cardId)) return;
 
@@ -467,7 +758,7 @@ const Module = () => {
           const updatedMatched = [...gameMatchedCardIds, el.cardId];
           setGameMatchedCardIds(updatedMatched);
           setGameSelected(null);
-          
+
           // Kiểm tra xem đã ghép hết chưa
           const totalPairs = gameElements.length / 2;
           if (updatedMatched.length === totalPairs) {
@@ -647,7 +938,7 @@ const Module = () => {
       setShuffledCards(shuffleArray(baseStudyCards));
     }
     setIsSettingsOpen(false);
-    toast.info("Đã khởi động lại thẻ ghi nhớ! 🔄");
+    toast.info("Đã khởi động lại thẻ ghi nhớ!");
   };
 
   const handleToggleShuffle = (checked) => {
@@ -682,7 +973,7 @@ const Module = () => {
         {/* Study Mode Navigation */}
         <div className="study-game-navbar">
           <button className="btn-back" onClick={() => {
-            if (window.confirm("Cậu có chắc chắn muốn dừng học và thoát ra ngoài không? 🌸")) {
+            if (window.confirm("Cậu có chắc chắn muốn dừng học và thoát ra ngoài không?")) {
               handleBackToModule();
             }
           }}>
@@ -691,7 +982,7 @@ const Module = () => {
           <div className="study-game-nav-title">
             <span>{moduleData?.name}</span>
             <span className="study-game-nav-badge">
-              {studyMode === "choice" ? "📝 Trắc nghiệm" : "✍️ Tự luận"}
+              {studyMode === "choice" ? "Trắc nghiệm" : "Tự luận"}
             </span>
           </div>
           <div style={{ width: "80px" }}></div>
@@ -766,14 +1057,13 @@ const Module = () => {
                           disabled={studyChecking}
                         />
                         <button type="submit" className="btn-submit-answer" disabled={studyChecking}>
-                          {studyChecking ? "Đang kiểm tra..." : "Kiểm tra đáp án 🚀"}
+                          {studyChecking ? "Đang kiểm tra..." : "Kiểm tra"}
                         </button>
                       </>
                     ) : (
                       <div className="write-feedback-box">
                         {studyIsCorrect ? (
                           <div className="feedback-result correct">
-                            <span className="feedback-icon">🎉</span>
                             <div className="feedback-content">
                               <h4>Chính xác! Xuất sắc quá!</h4>
                               <p>Đáp án: <strong>{studyCorrectAnswer}</strong></p>
@@ -781,7 +1071,6 @@ const Module = () => {
                           </div>
                         ) : (
                           <div className="feedback-result incorrect">
-                            <span className="feedback-icon">🌸</span>
                             <div className="feedback-content">
                               <h4>Chưa chính xác rồi, hãy cố gắng ở lần sau nhé!</h4>
                               <p>Đáp án đúng: <strong className="highlight-correct">{studyCorrectAnswer}</strong></p>
@@ -799,7 +1088,7 @@ const Module = () => {
               {studyChecked && (
                 <div className="next-action-wrapper">
                   <button className="btn-next-question" onClick={handleNextStudyQuestion} autoFocus>
-                    {studyCurrentIndex === studyQuestions.length - 1 ? "Xem kết quả 🏆" : "Tiếp tục ➡"}
+                    {studyCurrentIndex === studyQuestions.length - 1 ? "Xem kết quả" : "Tiếp tục"}
                   </button>
                 </div>
               )}
@@ -812,7 +1101,7 @@ const Module = () => {
           <div className="study-summary-container">
             <div className="study-summary-card">
               <h2>Hoàn Thành Bài Học!</h2>
-              <p className="study-summary-subtitle">Chúc mừng cậu đã hoàn thành mục tiêu học tập hôm nay! 🌸</p>
+              <p className="study-summary-subtitle">Chúc mừng cậu đã hoàn thành mục tiêu học tập hôm nay!</p>
 
               <div className="study-stats-cards-row">
                 <div className="study-stat-card correct">
@@ -838,10 +1127,10 @@ const Module = () => {
                   <div className="study-wrong-questions-list">
                     {studyStats.wrongQuestions.map((q, idx) => (
                       <div key={idx} className="study-wrong-question-item">
-                        <div className="study-wq-definition">❓ {q.question}</div>
+                        <div className="study-wq-definition">{q.question}</div>
                         <div className="study-wq-answers">
-                          <div className="study-wq-correct">✔ Đúng: <strong>{q.correctAnswer}</strong></div>
-                          <div className="study-wq-wrong">❌ Cậu gõ: <span>{q.userAnswer || "(Để trống)"}</span></div>
+                          <div className="study-wq-correct">Đúng: <strong>{q.correctAnswer}</strong></div>
+                          <div className="study-wq-wrong">Cậu gõ: <span>{q.userAnswer || "(Để trống)"}</span></div>
                         </div>
                       </div>
                     ))}
@@ -855,14 +1144,14 @@ const Module = () => {
                   onClick={handleRestartStudy}
                   disabled={loadingQuestions}
                 >
-                  {loadingQuestions ? "Đang tải câu hỏi... ⏳" : "🔄 Học lại chế độ này"}
+                  {loadingQuestions ? "Đang tải câu hỏi..." : "Học lại"}
                 </button>
                 <button
                   className="btn-summary-back"
                   onClick={handleBackToModule}
                   disabled={loadingQuestions}
                 >
-                  ⬅ Quay về học phần
+                  Quay về
                 </button>
               </div>
             </div>
@@ -873,74 +1162,437 @@ const Module = () => {
   }
 
   if (isPlayingGame) {
-    return (
-      <div className="study-game-layout game-layout">
-        {/* Game Navbar */}
-        <div className="study-game-navbar game-navbar">
-          <button className="btn-back" onClick={() => {
-            if (window.confirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không? 🌸")) {
-              handleExitGame();
-            }
-          }}>
-            ← Thoát
-          </button>
-          <div className="study-game-nav-title">
-            <span>{moduleData?.name}</span>
-            <span className="study-game-nav-badge">
-              🎮 Màn chơi {gameLevel}
-            </span>
+    if (gameMode === "match") {
+      return (
+        <div className="study-game-layout game-layout">
+          {/* Game Navbar */}
+          <div className="study-game-navbar game-navbar">
+            <button className="btn-back" onClick={() => {
+              if (window.confirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không? 🌸")) {
+                handleExitGame();
+              }
+            }}>
+              ← Thoát
+            </button>
+            <div className="study-game-nav-title">
+              <span>{moduleData?.name}</span>
+              <span className="study-game-nav-badge">
+                Màn chơi {gameLevel}
+              </span>
+            </div>
+            <div className="game-timer">
+              {gameTime.toFixed(1)}s
+            </div>
           </div>
-          <div className="game-timer">
-            ⏱️ {gameTime.toFixed(1)}s
+
+          {/* PLAYING STEP */}
+          {gameStep === "playing" && (
+            <div className="game-board-container">
+              <div className="game-board-grid">
+                {gameElements.map((el, idx) => {
+                  const isMatched = gameMatchedCardIds.includes(el.cardId);
+                  const isSelected = gameSelected && gameSelected.cardId === el.cardId && gameSelected.cardType === el.cardType;
+                  const isWrong = gameWrongElements.some(w => w.cardId === el.cardId && w.cardType === el.cardType);
+
+                  return (
+                    <button
+                      key={idx}
+                      className={`btn-game-piece ${isSelected ? "selected" : ""} ${isWrong ? "incorrect" : ""} ${isMatched ? "matched" : ""}`}
+                      onClick={() => handleSelectPiece(el)}
+                      disabled={isMatched || gameWrongElements.length > 0 || gameChecking}
+                    >
+                      <span className="piece-content">{el.content}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SUMMARY STEP */}
+          {gameStep === "summary" && (
+            <div className="study-summary-container">
+              <div className="study-summary-card game-summary-card">
+                <h2>Màn {gameLevel} Hoàn Thành!</h2>
+                <p className="study-summary-subtitle">Chúc mừng cậu đã ghép xong tất cả các cặp thẻ!</p>
+
+                <div className="game-summary-time-box">
+                  <span className="game-summary-time-lbl">Thời gian hoàn thành:</span>
+                  <span className="game-summary-time-val">{gameTime.toFixed(1)} giây</span>
+                </div>
+
+                <div className="study-summary-actions game-summary-actions">
+                  <button className="btn-summary-restart" onClick={handleRestartGameLevel} disabled={loadingGame}>
+                    {loadingGame ? "Đang tải... " : " Chơi lại màn này"}
+                  </button>
+                  <button className="btn-summary-back btn-game-next" onClick={handleNextGameLevel} disabled={loadingGame}>
+                    {loadingGame ? "Đang tải... " : "Màn tiếp theo"}
+                  </button>
+                </div>
+                <button className="btn-game-exit-text" onClick={handleExitGame} style={{ marginTop: "15px", background: "none", border: "none", color: "#8c7a91", fontWeight: "bold", cursor: "pointer" }}>
+                  Quay về học phần
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    } else if (gameMode === "gravity") {
+      return (
+        <div className="study-game-layout gravity-game-layout">
+          {/* Gravity Header */}
+          <div className="study-game-navbar gravity-navbar">
+            <button className="btn-back" onClick={() => {
+              if (window.confirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không? 🌸")) {
+                setIsPlayingGame(false);
+              }
+            }}>
+              ← Thoát
+            </button>
+            <div className="study-game-nav-title">
+              <span>🌠 Trò chơi Trọng lực</span>
+              <span className="study-game-nav-badge">
+                Điểm: {gravityScore}
+              </span>
+            </div>
+            <div className="gravity-lives">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <span key={i} className="heart-icon">
+                  {i < gravityLives ? "❤️" : "💔"}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* PLAYING STEP */}
+          {gravityStep === "playing" && (
+            <div className={`gravity-board ${gravityFlashRed ? "flash-red" : ""}`}>
+              {gravityWords.map((word) => {
+                const isDanger = word.y >= (boardHeight * 0.7);
+                return (
+                  <div
+                    key={word.id}
+                    className={`falling-word-bubble ${isDanger ? "danger-glow" : ""} ${word.isFading ? "fade-explode" : ""}`}
+                    style={{
+                      left: `${word.x}%`,
+                      top: `${word.y}px`
+                    }}
+                  >
+                    {word.text}
+                  </div>
+                );
+              })}
+
+              {/* Bottom input bar */}
+              <form onSubmit={handleGravitySubmit} className="gravity-input-form">
+                <input
+                  type="text"
+                  className={`gravity-input-field ${gravityInputWrong ? "input-shake" : ""}`}
+                  placeholder="Gõ và nhấn Enter..."
+                  value={gravityInput}
+                  onChange={(e) => setGravityInput(e.target.value)}
+                  autoFocus
+                  disabled={gravityLives <= 0}
+                />
+              </form>
+            </div>
+          )}
+
+          {/* SUMMARY STEP */}
+          {gravityStep === "summary" && (
+            <div className="study-summary-container">
+              <div className="study-summary-card gravity-summary-card">
+                <h2>Trò chơi Kết Thúc!</h2>
+                <p className="study-summary-subtitle">Cậu đã chiến đấu rất anh dũng!</p>
+
+                <div className="game-summary-time-box">
+                  <span className="game-summary-time-lbl">Điểm số đạt được:</span>
+                  <span className="game-summary-time-val">{gravityScore} điểm</span>
+                </div>
+
+                <div className="study-summary-actions game-summary-actions">
+                  <button className="btn-summary-restart" onClick={handleStartGravityGame} disabled={loadingGame}>
+                    {loadingGame ? "Đang tải... " : " Chơi lại"}
+                  </button>
+                  <button className="btn-summary-back" onClick={() => setIsPlayingGame(false)}>
+                    Quay về
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+  }
+
+  const currentCard =
+    studyCards.length > 0
+      ? studyCards[currentIndex]
+      : null;
+
+
+  if (isFullScreen && studyCards.length > 0) {
+    return (
+      <div className="flashcard-fullscreen-overlay">
+        {/* Top Navbar */}
+        <div className="fullscreen-navbar">
+          <button className="btn-fullscreen-exit" onClick={toggleFullScreen}>
+            Thoát toàn màn hình
+          </button>
+          <div className="fullscreen-nav-title">
+            <span>{moduleData?.name}</span>
+          </div>
+          <div className="fullscreen-progress-info">
+            Thẻ {currentIndex + 1} / {studyCards.length}
           </div>
         </div>
 
-        {/* PLAYING STEP */}
-        {gameStep === "playing" && (
-          <div className="game-board-container">
-            <div className="game-board-grid">
-              {gameElements.map((el, idx) => {
-                const isMatched = gameMatchedCardIds.includes(el.cardId);
-                const isSelected = gameSelected && gameSelected.cardId === el.cardId && gameSelected.cardType === el.cardType;
-                const isWrong = gameWrongElements.some(w => w.cardId === el.cardId && w.cardType === el.cardType);
-                
-                return (
+        {/* Main Content (Flashcard) */}
+        <div className="fullscreen-card-area">
+          <button
+            className="fullscreen-nav-arrow left"
+            onClick={handlePrev}
+            disabled={currentIndex === 0}
+          >
+            ‹
+          </button>
+
+          <div className="flashcard-wrapper fullscreen-wrapper">
+            <div
+              className={`flashcard-container fullscreen-container ${slideState !== "none" ? slideState : ""}`}
+              onClick={handleFlip}
+            >
+              <div className={`flashcard ${isFlipped ? "flipped" : ""} ${slideState !== "none" ? "no-transition" : ""}`}>
+                {/* FRONT FACE */}
+                <div className="flashcard-face flashcard-front">
                   <button
-                    key={idx}
-                    className={`btn-game-piece ${isSelected ? "selected" : ""} ${isWrong ? "incorrect" : ""} ${isMatched ? "matched" : ""}`}
-                    onClick={() => handleSelectPiece(el)}
-                    disabled={isMatched || gameWrongElements.length > 0 || gameChecking}
+                    className={`btn-flashcard-star ${(currentCard?.isStarred || currentCard?.starred) ? "starred" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleStar(currentCard.id);
+                    }}
+                    title={(currentCard?.isStarred || currentCard?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
                   >
-                    <span className="piece-content">{el.content}</span>
+                    ★
                   </button>
-                );
-              })}
+                  <div className="card-text">
+                    {showFirst === "term" ? currentCard?.term : currentCard?.definition}
+                  </div>
+                </div>
+
+                {/* BACK FACE */}
+                <div className="flashcard-face flashcard-back">
+                  <button
+                    className={`btn-flashcard-star ${(currentCard?.isStarred || currentCard?.starred) ? "starred" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleStar(currentCard.id);
+                    }}
+                    title={(currentCard?.isStarred || currentCard?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
+                  >
+                    ★
+                  </button>
+                  <div className="card-text">
+                    {showFirst === "term" ? currentCard?.definition : currentCard?.term}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        )}
 
-        {/* SUMMARY STEP */}
-        {gameStep === "summary" && (
-          <div className="study-summary-container">
-            <div className="study-summary-card game-summary-card">
-              <h2>Màn {gameLevel} Hoàn Thành! 🎉</h2>
-              <p className="study-summary-subtitle">Chúc mừng cậu đã ghép xong tất cả các cặp thẻ! 🌸</p>
-              
-              <div className="game-summary-time-box">
-                <span className="game-summary-time-lbl">Thời gian hoàn thành:</span>
-                <span className="game-summary-time-val">{gameTime.toFixed(1)} giây</span>
+          <button
+            className="fullscreen-nav-arrow right"
+            onClick={handleNext}
+            disabled={currentIndex === studyCards.length - 1}
+          >
+            ›
+          </button>
+        </div>
+
+        {/* Bottom controls */}
+        <div className="fullscreen-controls">
+          <div className="fullscreen-controls-center">
+            <button
+              className="btn-control"
+              onClick={handlePrev}
+              disabled={currentIndex === 0}
+            >
+              ⬅ Trước
+            </button>
+            <div className="card-counter">
+              {currentIndex + 1} / {studyCards.length}
+            </div>
+            <button
+              className="btn-control"
+              onClick={handleNext}
+              disabled={currentIndex === studyCards.length - 1}
+            >
+              Sau ➡
+            </button>
+          </div>
+
+          <div className="fullscreen-controls-right">
+            <button
+              className="btn-flashcard-action-inline"
+              onClick={() => setIsSettingsOpen(true)}
+              title="Cài đặt thẻ ghi nhớ"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* MODAL CÀI ĐẶT THẺ GHI NHỚ TRONG FULLSCREEN */}
+        {isSettingsOpen && (
+          <div
+            className="module-modal-overlay"
+            onClick={() => setIsSettingsOpen(false)}
+          >
+            <div
+              className="settings-modal-content"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="settings-modal-header">
+                <h3>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ animation: "spin 8s linear infinite" }}
+                  >
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  Tùy chọn
+                </h3>
+                <button
+                  className="btn-settings-close"
+                  onClick={() => setIsSettingsOpen(false)}
+                >
+                  &times;
+                </button>
               </div>
 
-              <div className="study-summary-actions game-summary-actions">
-                <button className="btn-summary-restart" onClick={handleRestartGameLevel} disabled={loadingGame}>
-                  {loadingGame ? "Đang tải... ⏳" : "🔄 Chơi lại màn này"}
-                </button>
-                <button className="btn-summary-back btn-game-next" onClick={handleNextGameLevel} disabled={loadingGame}>
-                  {loadingGame ? "Đang tải... ⏳" : "➡️ Màn tiếp theo"}
-                </button>
+              <div className="settings-options-list">
+                {/* Tùy chọn 1: Chỉ học thẻ gắn sao */}
+                <div className="settings-option-item">
+                  <div className="settings-option-info">
+                    <span className="settings-option-label">Chỉ học thuật ngữ có gắn sao</span>
+                    <span className="settings-option-desc">
+                      Học riêng nhóm thẻ bạn đã đánh dấu sao (có {activeCards.filter(c => c.isStarred || c.starred).length} thẻ)
+                    </span>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={studyOnlyStarred}
+                      onChange={(e) => handleToggleStarredOnly(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+
+                {/* Tùy chọn 2: Xáo trộn thẻ */}
+                <div className="settings-option-item">
+                  <div className="settings-option-info">
+                    <span className="settings-option-label">Xáo trộn thẻ</span>
+                    <span className="settings-option-desc">
+                      Thay đổi thứ tự xuất hiện ngẫu nhiên của các thẻ
+                    </span>
+                  </div>
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={isShuffled}
+                      onChange={(e) => handleToggleShuffle(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </div>
+
+                {/* Tùy chọn 3: Chọn mặt hiển thị trước */}
+                <div className="settings-option-item" style={{ flexDirection: "column", alignItems: "stretch", gap: "10px" }}>
+                  <div className="settings-option-info">
+                    <span className="settings-option-label">Chọn mặt hiển thị trước</span>
+                    <span className="settings-option-desc">
+                      Chọn xem bạn muốn hiện Thuật ngữ hay Định nghĩa trước
+                    </span>
+                  </div>
+                  <div className="segment-control">
+                    <button
+                      type="button"
+                      className={`segment-btn ${showFirst === "term" ? "active" : ""}`}
+                      onClick={() => {
+                        setShowFirst("term");
+                        setIsFlipped(false);
+                      }}
+                    >
+                      Thuật ngữ
+                    </button>
+                    <button
+                      type="button"
+                      className={`segment-btn ${showFirst === "definition" ? "active" : ""}`}
+                      onClick={() => {
+                        setShowFirst("definition");
+                        setIsFlipped(false);
+                      }}
+                    >
+                      Định nghĩa
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tùy chọn 4: Khởi động lại */}
+                <div className="settings-option-item" style={{ borderTop: "2px solid #fff0f5", paddingTop: "20px", marginTop: "10px" }}>
+                  <button
+                    type="button"
+                    className="btn-reset-flashcards"
+                    onClick={handleRestartFlashcards}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                      <path d="M21 3v5h-5" />
+                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                      <path d="M3 21v-5h5" />
+                    </svg>
+                    Khởi động lại Thẻ ghi nhớ
+                  </button>
+                </div>
               </div>
-              <button className="btn-game-exit-text" onClick={handleExitGame} style={{ marginTop: "15px", background: "none", border: "none", color: "#8c7a91", fontWeight: "bold", cursor: "pointer" }}>
-                Quay về học phần
+
+              <button
+                className="btn-settings-done"
+                onClick={() => setIsSettingsOpen(false)}
+              >
+                Hoàn tất
               </button>
             </div>
           </div>
@@ -948,11 +1600,6 @@ const Module = () => {
       </div>
     );
   }
-
-  const currentCard =
-    studyCards.length > 0
-      ? studyCards[currentIndex]
-      : null;
 
   return (
     <div className="module-detail-container">
@@ -969,12 +1616,12 @@ const Module = () => {
           <h2 className="module-title">{moduleData.name}</h2>
           <p className="module-desc">{moduleData.description}</p>
           <div className="module-mode-selector">
-            <button className="btn-mode active">🎴 Thẻ ghi nhớ</button>
+            <button className="btn-mode active">Thẻ ghi nhớ</button>
             <button className="btn-mode" onClick={() => setIsStudyConfigOpen(true)}>
-              📚 Chế độ học
+              Chế độ học
             </button>
             <button className="btn-mode" onClick={() => setIsGameConfigOpen(true)}>
-              🎮 Trò chơi
+              Trò chơi
             </button>
           </div>
         </div>
@@ -1042,29 +1689,48 @@ const Module = () => {
                 Sau ➡
               </button>
 
-              <button
-                className="btn-flashcard-settings"
-                onClick={() => setIsSettingsOpen(true)}
-                title="Cài đặt thẻ ghi nhớ"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+              <div className="flashcard-action-buttons">
+                <button
+                  className="btn-flashcard-action btn-flashcard-fullscreen"
+                  onClick={toggleFullScreen}
+                  title="Mở toàn màn hình"
                 >
-                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-              </button>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                  </svg>
+                </button>
+                <button
+                  className="btn-flashcard-action btn-flashcard-settings"
+                  onClick={() => setIsSettingsOpen(true)}
+                  title="Cài đặt thẻ ghi nhớ"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </>
         ) : (
           <div className="empty-cards-placeholder">
-            Cậu chưa gắn sao cho thẻ nào cả. Hãy nhấn nút gắn sao (⭐) trên các thẻ ở danh sách phía dưới để học riêng nhé! 🌸
+            Cậu chưa gắn sao cho thẻ nào cả. Hãy nhấn nút gắn sao trên các thẻ ở danh sách phía dưới để học riêng nhé!
           </div>
         )
       ) : (
@@ -1098,7 +1764,7 @@ const Module = () => {
               className="btn-add-card"
               onClick={() => setIsCreateCardModalOpen(true)}
             >
-              Thêm thẻ mới
+              Thêm thẻ
             </button>
           </div>
         </div>
@@ -1158,7 +1824,7 @@ const Module = () => {
             className="module-modal-content study-config-modal"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="module-modal-title">Chọn Chế Độ Học 📚</h3>
+            <h3 className="module-modal-title">Chọn Chế Độ Học</h3>
             <p className="study-config-subtitle">Hãy chọn phương pháp học tập phù hợp với mục tiêu của cậu nhé!</p>
 
             <div className="study-mode-options">
@@ -1194,10 +1860,7 @@ const Module = () => {
             <div className="study-config-settings">
               <div className="study-config-option">
                 <div className="study-config-info">
-                  <span className="study-config-label">Chỉ học thuật ngữ đã gắn sao (⭐)</span>
-                  <span className="study-config-desc">
-                    Học riêng nhóm thẻ ưu tiên của cậu (Có {starredCards.length} thẻ gắn sao)
-                  </span>
+                  <span className="study-config-label">Chỉ học thuật ngữ đã gắn sao</span>
                 </div>
                 <label className="toggle-switch">
                   <input
@@ -1225,7 +1888,7 @@ const Module = () => {
                 onClick={handleStartStudy}
                 disabled={loadingQuestions || (studyStarredOnly && starredCards.length === 0) || (!studyStarredOnly && activeCards.length === 0)}
               >
-                {loadingQuestions ? "Đang tạo câu hỏi..." : "Bắt đầu học 🚀"}
+                {loadingQuestions ? "Đang tạo câu hỏi..." : "Bắt đầu"}
               </button>
             </div>
           </div>
@@ -1242,7 +1905,7 @@ const Module = () => {
             className="module-modal-content study-config-modal game-config-modal"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="module-modal-title">Chọn Trò Chơi 🎮</h3>
+            <h3 className="module-modal-title">Chọn Trò Chơi</h3>
             <p className="study-config-subtitle">Hãy thử thách bản thân với các trò chơi ôn tập thú vị nhé!</p>
 
             <div className="study-mode-options">
@@ -1252,8 +1915,19 @@ const Module = () => {
               >
                 <div className="study-mode-icon">🧩</div>
                 <div className="study-mode-text-wrapper">
-                  <h4>Ghép từ (Match)</h4>
+                  <h4>Ghép từ</h4>
                   <p>Ghép cặp Thuật ngữ và Định nghĩa chính xác nhanh nhất có thể!</p>
+                </div>
+              </div>
+
+              <div
+                className={`study-mode-card ${gameMode === "gravity" ? "active" : ""}`}
+                onClick={() => setGameMode("gravity")}
+              >
+                <div className="study-mode-icon">🌠</div>
+                <div className="study-mode-text-wrapper">
+                  <h4>Trọng lực</h4>
+                  <p>Nhập đáp án đúng trước khi các thuật ngữ rơi xuống đất!</p>
                 </div>
               </div>
             </div>
@@ -1261,10 +1935,7 @@ const Module = () => {
             <div className="study-config-settings">
               <div className="study-config-option">
                 <div className="study-config-info">
-                  <span className="study-config-label">Chỉ chơi với thẻ đã gắn sao (⭐)</span>
-                  <span className="study-config-desc">
-                    Tập trung ôn tập nhóm thẻ ưu tiên của cậu (Có {starredCards.length} thẻ gắn sao)
-                  </span>
+                  <span className="study-config-label">Chỉ chơi với thẻ đã gắn sao</span>
                 </div>
                 <label className="toggle-switch">
                   <input
@@ -1276,6 +1947,30 @@ const Module = () => {
                   <span className="toggle-slider"></span>
                 </label>
               </div>
+
+              {gameMode === "gravity" && (
+                <div className="study-config-option" style={{ flexDirection: "column", alignItems: "stretch", gap: "10px", borderTop: "1px solid #fff0f5", paddingTop: "15px", marginTop: "20px" }}>
+                  <div className="study-config-info">
+                    <span className="study-config-label">Hiển thị câu hỏi bằng</span>
+                  </div>
+                  <div className="segment-control" style={{ marginTop: "5px" }}>
+                    <button
+                      type="button"
+                      className={`segment-btn ${gravityShowType === "definition" ? "active" : ""}`}
+                      onClick={() => setGravityShowType("definition")}
+                    >
+                      Định nghĩa
+                    </button>
+                    <button
+                      type="button"
+                      className={`segment-btn ${gravityShowType === "term" ? "active" : ""}`}
+                      onClick={() => setGravityShowType("term")}
+                    >
+                      Thuật ngữ
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="module-modal-actions" style={{ marginTop: "25px" }}>
@@ -1292,7 +1987,7 @@ const Module = () => {
                 onClick={handleStartGame}
                 disabled={loadingGame || (gameStarredOnly && starredCards.length === 0) || (!gameStarredOnly && activeCards.length === 0)}
               >
-                {loadingGame ? "Đang tạo trò chơi..." : "Bắt đầu chơi 🚀"}
+                {loadingGame ? "Đang tạo trò chơi..." : "Bắt đầu"}
               </button>
             </div>
           </div>
@@ -1309,7 +2004,7 @@ const Module = () => {
             className="module-modal-content"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="module-modal-title">Thêm Thẻ Mới</h3>
+            <h3 className="module-modal-title">Thêm Thẻ</h3>
             <form onSubmit={handleCreateCard}>
               <div className="module-form-group">
                 <label>Thuật ngữ (*)</label>
@@ -1376,7 +2071,7 @@ const Module = () => {
                   className="module-form-textarea import-textarea"
                   value={rawText}
                   onChange={(e) => setRawText(e.target.value)}
-                  placeholder={"Ví dụ:\nThuật ngữ 1 - Định nghĩa 1\nThuật ngữ 2 - Định nghĩa 2"}
+                  placeholder={"Thuật ngữ 1 - Định nghĩa 1\nThuật ngữ 2 - Định nghĩa 2"}
                   rows={8}
                   autoFocus
                 />
@@ -1390,9 +2085,9 @@ const Module = () => {
                     value={cardSeparator}
                     onChange={(e) => setCardSeparator(e.target.value)}
                   >
-                    <option value="\n">Dòng mới (New line)</option>
-                    <option value=";">Dấu chấm phẩy (;)</option>
-                    <option value=",">Dấu phẩy (,)</option>
+                    <option value="\n">Dòng mới</option>
+                    <option value=";">Dấu chấm phẩy</option>
+                    <option value=",">Dấu phẩy</option>
                   </select>
                 </div>
 
@@ -1403,10 +2098,10 @@ const Module = () => {
                     value={termSeparator}
                     onChange={(e) => setTermSeparator(e.target.value)}
                   >
-                    <option value="-">Dấu gạch ngang (-)</option>
-                    <option value="\t">Dấu Tab (Tab)</option>
-                    <option value=":">Dấu hai chấm (:)</option>
-                    <option value=",">Dấu phẩy (,)</option>
+                    <option value="-">Dấu gạch ngang</option>
+                    <option value="\t">Dấu Tab</option>
+                    <option value=":">Dấu hai chấm</option>
+                    <option value=",">Dấu phẩy</option>
                   </select>
                 </div>
               </div>
@@ -1424,7 +2119,7 @@ const Module = () => {
                   className="btn-modal-submit"
                   disabled={isImporting}
                 >
-                  {isImporting ? "Đang nhập..." : "Xác nhận nhập"}
+                  {isImporting ? "Đang nhập..." : "Xác nhận"}
                 </button>
               </div>
             </form>

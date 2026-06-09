@@ -17,7 +17,7 @@
 .module-header-container {
   text-align: center;
   margin-top: 5px;
-  margin-bottom: 40px;
+  margin-bottom: 15px;
   width: 100%;
 }
 
@@ -1217,11 +1217,6 @@
   color: #e64980;
 }
 
-.feedback-icon {
-  font-size: 28px;
-  line-height: 1;
-}
-
 .feedback-content h4 {
   margin: 0 0 6px 0;
   font-size: 16px;
@@ -1308,14 +1303,13 @@
 .study-summary-subtitle {
   color: #8c7a91;
   font-size: 13px;
-  margin-bottom: 18px;
 }
 
 .study-stats-cards-row {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 10px;
-  margin-bottom: 18px;
+  margin: 18px 0px;
 }
 
 .study-stat-card {
@@ -1368,8 +1362,6 @@
 
 .study-wrong-questions-section {
   text-align: left;
-  border-top: 2px solid #fff0f5;
-  padding-top: 10px;
   margin-bottom: 20px;
   flex: 1;
   display: flex;
@@ -1392,25 +1384,37 @@
   flex: 1;
   overflow-y: auto;
   padding-right: 4px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.study-wrong-questions-list::-webkit-scrollbar {
+  display: none;
 }
 
 .study-wrong-question-item {
   border: 1px solid #ffe0ea;
   border-radius: 12px;
-  padding: 8px 12px;
-  background: #fdfdfd;
+  padding: 10px 14px;
+  background: #fffdfd;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .study-wq-definition {
   font-weight: 800;
   color: #5a4b5e;
-  font-size: 13px;
-  margin-bottom: 4px;
+  font-size: 14px;
+  border-left: 3px solid #ff89a9;
+  padding-left: 8px;
 }
 
 .study-wrong-question-item .study-wq-answers {
   display: flex;
-  gap: 20px;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 11px;
   font-size: 12px;
 }
 
@@ -1605,10 +1609,6 @@
   font-size: 14px;
 }
 
-.study-config-desc {
-  font-size: 11px;
-  color: #8c7a91;
-}
 
 /* ==========================================
    MATCH GAME (GHÉP THỂ) INLINE STYLES
@@ -1707,9 +1707,21 @@
 
 /* Hiệu ứng rung khi ghép sai */
 @keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-6px); }
-  40%, 80% { transform: translateX(6px); }
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
 }
 
 /* Màn hình kết quả game */
@@ -1726,7 +1738,7 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  margin: 10px 0 25px 0;
+  margin: 25px 0px;
 }
 
 .game-summary-time-lbl {
@@ -1756,6 +1768,7 @@
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
   }
+
   .btn-game-piece {
     min-height: 85px;
     font-size: 14px;
@@ -1768,8 +1781,486 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
+
   .btn-game-piece {
     min-height: 75px;
     font-size: 13px;
   }
+}
+
+/* Ẩn thanh cuộn của trình duyệt khi đang học hoặc đang chơi game */
+body:has(.study-game-layout) {
+  overflow: hidden;
+}
+
+/* ==========================================
+   FLASHCARD FULLSCREEN OVERLAY STYLES
+   ========================================== */
+
+.flashcard-fullscreen-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #fffafc;
+  z-index: 3000;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* Hide scrollbar when fullscreen is active */
+body:has(.flashcard-fullscreen-overlay) {
+  overflow: hidden;
+}
+
+.fullscreen-navbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 15px 30px;
+  background: white;
+  border-bottom: 2px solid #ffe0ea;
+  box-shadow: 0 2px 10px rgba(255, 107, 158, 0.03);
+}
+
+.fullscreen-navbar> :first-child {
+  justify-self: start;
+}
+
+.fullscreen-navbar> :last-child {
+  justify-self: end;
+}
+
+.btn-fullscreen-exit {
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 2px solid #ffe0ea;
+  background: white;
+  color: #8c7a91;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-fullscreen-exit:hover {
+  background: #fff0f5;
+  color: #ff6b9e;
+  border-color: #ff89a9;
+}
+
+.fullscreen-nav-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #ff6b9e;
+}
+
+.fullscreen-progress-info {
+  font-size: 15px;
+  font-weight: bold;
+  color: #8c7a91;
+  background: #fff0f5;
+  border: 1px solid #ffe0ea;
+  padding: 4px 12px;
+  border-radius: 15px;
+}
+
+.fullscreen-card-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 30px;
+  padding: 20px;
+  max-width: 1400px;
+  width: 100%;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.fullscreen-nav-arrow {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: 2px solid #ffe0ea;
+  background: white;
+  color: #ff6b9e;
+  font-size: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 4px 10px rgba(255, 107, 158, 0.05);
+}
+
+.fullscreen-nav-arrow:hover:not(:disabled) {
+  background: #fff0f5;
+  border-color: #ff89a9;
+  transform: scale(1.1);
+  box-shadow: 0 6px 15px rgba(255, 107, 158, 0.15);
+}
+
+.fullscreen-nav-arrow:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Large card container for fullscreen mode */
+.flashcard-container.fullscreen-container {
+  max-width: 1150px;
+  height: min(650px, calc(100vh - 220px));
+  margin-bottom: 0;
+}
+
+.flashcard-container.fullscreen-container .card-text {
+  font-size: 48px;
+}
+
+.flashcard-wrapper.fullscreen-wrapper {
+  flex: 1;
+  max-width: 1150px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fullscreen-controls {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px 40px;
+  background: white;
+  border-top: 2px solid #ffe0ea;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.fullscreen-controls-center {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.fullscreen-controls-right {
+  position: absolute;
+  right: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 12px;
+}
+
+/* Settings button wrapper in normal controls */
+.flashcard-action-buttons {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 12px;
+}
+
+.flashcard-action-buttons .btn-flashcard-settings {
+  position: static;
+  transform: none;
+}
+
+.btn-flashcard-action {
+  background: white;
+  border: 2px solid #ffe0ea;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #ff6b9e;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 10px rgba(255, 107, 158, 0.05);
+}
+
+.btn-flashcard-action:hover {
+  background: #fff0f5;
+  border-color: #ff89a9;
+  transform: scale(1.1);
+  box-shadow: 0 6px 15px rgba(255, 107, 158, 0.15);
+}
+
+.btn-flashcard-action svg {
+  width: 22px;
+  height: 22px;
+  transition: transform 0.4s ease;
+}
+
+.btn-flashcard-action.btn-flashcard-settings:hover svg {
+  transform: rotate(45deg);
+}
+
+/* Settings button in fullscreen controls */
+.btn-flashcard-action-inline {
+  background: white;
+  border: 2px solid #ffe0ea;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #ff6b9e;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 10px rgba(255, 107, 158, 0.05);
+}
+
+.btn-flashcard-action-inline:hover {
+  background: #fff0f5;
+  border-color: #ff89a9;
+  transform: scale(1.1);
+  box-shadow: 0 6px 15px rgba(255, 107, 158, 0.15);
+}
+
+.btn-flashcard-action-inline svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Responsiveness for fullscreen mode */
+@media (max-width: 992px) {
+  .flashcard-container.fullscreen-container {
+    max-width: 100%;
+    height: 400px;
+  }
+}
+
+@media (max-width: 768px) {
+  .fullscreen-nav-arrow {
+    display: none;
+    /* Hide side arrows on small mobile */
+  }
+
+  .fullscreen-navbar {
+    padding: 10px 15px;
+  }
+
+  .fullscreen-nav-title {
+    font-size: 15px;
+  }
+
+  .flashcard-container.fullscreen-container {
+    height: 320px;
+  }
+
+  .fullscreen-controls {
+    padding: 15px;
+    flex-direction: column;
+    gap: 15px;
+  }
+
+  .fullscreen-controls-right {
+    position: static;
+    transform: none;
+    justify-content: center;
+  }
+}
+
+/* ==========================================
+   GRAVITY GAME STYLES
+   ========================================== */
+
+.gravity-game-layout {
+  display: flex;
+  flex-direction: column;
+}
+
+.gravity-navbar {
+  margin-bottom: 15px !important;
+}
+
+.gravity-lives {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.gravity-lives .heart-icon {
+  font-size: 22px;
+  display: inline-block;
+  animation: heartBeat 1.2s infinite ease-in-out alternate;
+}
+
+@keyframes heartBeat {
+  0% {
+    transform: scale(1);
+  }
+
+  100% {
+    transform: scale(1.1);
+  }
+}
+
+.gravity-board {
+  position: relative;
+  width: 100%;
+  height: 440px;
+  /* boardHeight constant in Module.jsx */
+  background: radial-gradient(circle at center, #fffafc 0%, #fff0f5 100%);
+  background-image: radial-gradient(circle at center, #fffafc 0%, #fff0f5 100%),
+    linear-gradient(rgba(255, 137, 169, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 137, 169, 0.03) 1px, transparent 1px);
+  background-size: 100% 100%, 20px 20px, 20px 20px;
+  border-radius: 20px;
+  border: 2px solid #ffe0ea;
+  overflow: hidden;
+  box-sizing: border-box;
+  box-shadow: inset 0 4px 20px rgba(255, 107, 158, 0.02), 0 8px 25px rgba(255, 107, 158, 0.04);
+}
+
+.falling-word-bubble {
+  position: absolute;
+  transform: translateX(-50%) scale(1);
+  background: white;
+  border: 2px solid #ffccd8;
+  border-radius: 20px;
+  padding: 8px 18px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #5a4b5e;
+  box-shadow: 0 4px 12px rgba(255, 107, 158, 0.08);
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+  z-index: 10;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+
+.falling-word-bubble.danger-glow {
+  border-color: #ff4d79;
+  box-shadow: 0 0 12px rgba(255, 77, 121, 0.3);
+  animation: danger-pulse 0.8s infinite alternate ease-in-out;
+}
+
+@keyframes danger-pulse {
+  0% {
+    transform: translateX(-50%) scale(1);
+    border-color: #ff89a9;
+    background-color: white;
+  }
+
+  100% {
+    transform: translateX(-50%) scale(1.05);
+    border-color: #ff3b6f;
+    background-color: #fff0f3;
+    box-shadow: 0 0 16px rgba(255, 59, 111, 0.4);
+  }
+}
+
+.falling-word-bubble.fade-explode {
+  animation: explode-anim 0.4s forwards cubic-bezier(0.1, 0.8, 0.3, 1);
+  z-index: 20;
+}
+
+@keyframes explode-anim {
+  0% {
+    transform: translateX(-50%) scale(1);
+    opacity: 1;
+    background-color: #fff0f5;
+    border-color: #ff89a9;
+  }
+
+  50% {
+    opacity: 0.8;
+    background-color: #ffccd8;
+    border-color: #ff6b9e;
+  }
+
+  100% {
+    transform: translateX(-50%) scale(1.4);
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+
+.gravity-input-form {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 0 20px;
+  box-sizing: border-box;
+  z-index: 15;
+}
+
+.gravity-input-field {
+  width: 100%;
+  max-width: 480px;
+  padding: 12px 24px;
+  border-radius: 24px;
+  border: 2px solid #ffe0ea;
+  outline: none;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #5a4b5e;
+  background-color: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 6px 20px rgba(255, 107, 158, 0.05);
+  transition: all 0.2s ease;
+}
+
+.gravity-input-field:focus {
+  border-color: #ff89a9;
+  box-shadow: 0 6px 20px rgba(255, 107, 158, 0.18);
+  background-color: white;
+}
+
+.gravity-input-field.input-shake {
+  animation: input-shake-anim 0.4s ease-in-out;
+  border-color: #ff4d79;
+  background-color: #fff0f3;
+}
+
+@keyframes input-shake-anim {
+
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
+.gravity-board.flash-red {
+  animation: flash-red-anim 0.2s ease-out;
+}
+
+@keyframes flash-red-anim {
+  0% {
+    background-color: rgba(255, 77, 121, 0.25);
+    box-shadow: inset 0 0 30px rgba(255, 77, 121, 0.4);
+  }
+
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.gravity-summary-card {
+  border-color: #ffccd8 !important;
 }

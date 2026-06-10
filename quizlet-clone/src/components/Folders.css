@@ -102,12 +102,16 @@
   border: 2px solid #ffe0ea;
   border-radius: 16px;
   padding: 20px;
-  text-align: left;
+  text-align: center;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 15px;
+  justify-content: center;
+  gap: 12px;
+  min-height: 142px;
+  box-sizing: border-box;
 }
 
 .folder-card:hover {
@@ -282,5 +286,94 @@
 @media (max-width: 480px) {
   .folders-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* --- HOVER OPTIONS AND DROPDOWN FOR FOLDER CARDS --- */
+.folder-card {
+  position: relative;
+}
+
+.folder-card-options-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #8c7a91;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  transition: all 0.2s;
+  opacity: 0;
+  outline: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.folder-card:hover .folder-card-options-btn {
+  opacity: 1;
+}
+
+.folder-card-options-btn:hover {
+  background-color: #ffe0ea;
+  color: #ff6b9e;
+}
+
+/* Options dropdown container */
+.folder-card-dropdown {
+  position: absolute;
+  top: 40px;
+  right: 10px;
+  background: white;
+  border: 2px solid #ffe0ea;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(255, 107, 158, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 50;
+  min-width: 120px;
+  animation: dropdownFadeIn 0.2s ease-out;
+}
+
+.dropdown-item {
+  background: none;
+  border: none;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #5a4b5e;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s;
+  display: block;
+  width: 100%;
+  outline: none;
+}
+
+.dropdown-item:hover {
+  background-color: #fff0f5;
+  color: #ff6b9e;
+}
+
+.dropdown-item.delete:hover {
+  background-color: #fff0f0;
+  color: #e64980;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

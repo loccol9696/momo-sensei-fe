@@ -22,6 +22,22 @@ const FolderDetail = () => {
   const [newModulePermission, setNewModulePermission] = useState("PUBLIC");
   const [newModulePassword, setNewModulePassword] = useState("");
 
+  // State Modal chỉnh sửa Module
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingModule, setEditingModule] = useState(null);
+  const [activeDropdownModuleId, setActiveDropdownModuleId] = useState(null);
+
+  // Close dropdown menu on click outside
+  useEffect(() => {
+    const handleDocumentClick = () => {
+      setActiveDropdownModuleId(null);
+    };
+    document.addEventListener("click", handleDocumentClick);
+    return () => {
+      document.removeEventListener("click", handleDocumentClick);
+    };
+  }, []);
+
   // --- API CALLS ---
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -117,6 +133,69 @@ const FolderDetail = () => {
     }
   };
 
+  const handleOpenEditModal = (mod) => {
+    setEditingModule(mod);
+    setNewModuleName(mod.name);
+    setNewModuleDesc(mod.description || "");
+    setNewModulePermission(mod.permission || "PUBLIC");
+    setNewModulePassword(""); // Do not pre-fill passwords
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateModule = async (e) => {
+    e.preventDefault();
+    if (!newModuleName.trim())
+      return toast.warning("Cậu chưa nhập tên học phần kìa!");
+    if (newModulePermission === "PASSWORD" && !newModulePassword.trim())
+      return toast.warning("Hãy nhập mật khẩu nhé!");
+
+    setIsCreating(true);
+    try {
+      const token = localStorage.getItem("token");
+      const payload = {
+        name: newModuleName,
+        description: newModuleDesc,
+        permission: newModulePermission,
+        password: newModulePermission === "PASSWORD" ? newModulePassword : null,
+      };
+
+      const response = await axios.put(
+        `http://localhost:8080/api/modules/${editingModule.id}`,
+        payload,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.data.success) {
+        toast.success("Cập nhật học phần thành công! 🎉");
+        resetForm();
+        setEditingModule(null);
+        setIsEditModalOpen(false);
+        fetchModules();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Lỗi khi cập nhật học phần.");
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleDeleteModule = async (modId) => {
+    if (!window.confirm("Cậu có chắc muốn xóa học phần này không? 🌸")) return;
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.delete(
+        `http://localhost:8080/api/modules/${modId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.data.success) {
+        toast.success("Xóa học phần thành công! 🎉");
+        fetchModules();
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Lỗi khi xóa học phần.");
+    }
+  };
+
   if (loading)
     return <div className="loading-text">Đang tải dữ liệu... ⏳</div>;
 
@@ -139,6 +218,7 @@ const FolderDetail = () => {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Tìm kiếm học phần..."
+            spellCheck={false}
           />
           <button
             className="btn-create-module"
@@ -159,10 +239,45 @@ const FolderDetail = () => {
             <div
               key={mod.id}
               className="module-card"
-              onClick={() =>
-                navigate(`/modules/${mod.id}`)
-              } /* ĐÃ THÊM SỰ KIỆN CHUYỂN TRANG TẠI ĐÂY */
+              onClick={() => navigate(`/modules/${mod.id}`)}
             >
+              {/* Ellipsis options trigger button (visible on hover) */}
+              <button
+                className="module-card-options-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setActiveDropdownModuleId(activeDropdownModuleId === mod.id ? null : mod.id);
+                }}
+              >
+                ⋮
+              </button>
+
+              {/* Options dropdown menu */}
+              {activeDropdownModuleId === mod.id && (
+                <div className="module-card-dropdown" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="dropdown-item"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveDropdownModuleId(null);
+                      handleOpenEditModal(mod);
+                    }}
+                  >
+                    Chỉnh sửa
+                  </button>
+                  <button
+                    className="dropdown-item delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveDropdownModuleId(null);
+                      handleDeleteModule(mod.id);
+                    }}
+                  >
+                    Xóa
+                  </button>
+                </div>
+              )}
+
               <div className="module-icon">📝</div>
               <div className="module-info">
                 <h4>{mod.name}</h4>
@@ -199,6 +314,7 @@ const FolderDetail = () => {
                   value={newModuleName}
                   onChange={(e) => setNewModuleName(e.target.value)}
                   autoFocus
+                  spellCheck={false}
                 />
               </div>
               <div className="module-form-group">
@@ -207,6 +323,7 @@ const FolderDetail = () => {
                   className="module-form-textarea"
                   value={newModuleDesc}
                   onChange={(e) => setNewModuleDesc(e.target.value)}
+                  spellCheck={false}
                 />
               </div>
               <div className="module-form-group">
@@ -246,6 +363,90 @@ const FolderDetail = () => {
                   disabled={isCreating}
                 >
                   {isCreating ? "Đang tạo..." : "Xác nhận"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CHỈNH SỬA MODULE */}
+      {isEditModalOpen && (
+        <div
+          className="module-modal-overlay"
+          onClick={() => {
+            setIsEditModalOpen(false);
+            setEditingModule(null);
+            resetForm();
+          }}
+        >
+          <div
+            className="module-modal-content"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="module-modal-title">Chỉnh Sửa Học Phần</h3>
+            <form onSubmit={handleUpdateModule}>
+              <div className="module-form-group">
+                <label className="module-form-label">Tên học phần (*)</label>
+                <input
+                  type="text"
+                  className="module-form-input"
+                  value={newModuleName}
+                  onChange={(e) => setNewModuleName(e.target.value)}
+                  autoFocus
+                  spellCheck={false}
+                />
+              </div>
+              <div className="module-form-group">
+                <label className="module-form-label">Mô tả</label>
+                <textarea
+                  className="module-form-textarea"
+                  value={newModuleDesc}
+                  onChange={(e) => setNewModuleDesc(e.target.value)}
+                  spellCheck={false}
+                />
+              </div>
+              <div className="module-form-group">
+                <label className="module-form-label">Quyền truy cập (*)</label>
+                <select
+                  className="module-form-select"
+                  value={newModulePermission}
+                  onChange={(e) => setNewModulePermission(e.target.value)}
+                >
+                  <option value="PUBLIC">Công khai</option>
+                  <option value="PRIVATE">Chỉ mình tôi</option>
+                  <option value="PASSWORD">Cần mật khẩu</option>
+                </select>
+              </div>
+              {newModulePermission === "PASSWORD" && (
+                <div className="module-form-group">
+                  <label className="module-form-label">Mật khẩu (*)</label>
+                  <input
+                    type="password"
+                    className="module-form-input"
+                    value={newModulePassword}
+                    onChange={(e) => setNewModulePassword(e.target.value)}
+                  />
+                </div>
+              )}
+              <div className="module-modal-actions">
+                <button
+                  type="button"
+                  className="btn-modal-cancel"
+                  onClick={() => {
+                    setIsEditModalOpen(false);
+                    setEditingModule(null);
+                    resetForm();
+                  }}
+                >
+                  Hủy
+                </button>
+                <button
+                  type="submit"
+                  className="btn-modal-submit"
+                  disabled={isCreating}
+                >
+                  {isCreating ? "Đang lưu..." : "Cập nhật"}
                 </button>
               </div>
             </form>

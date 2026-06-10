@@ -96,6 +96,16 @@ const Module = () => {
   const [gravityShowType, setGravityShowType] = useState("definition"); // "definition" | "term"
   const [gravityFlashRed, setGravityFlashRed] = useState(false);
   const [gravitySpawnedCardIds, setGravitySpawnedCardIds] = useState([]);
+  const [exitConfirm, setExitConfirm] = useState({ isOpen: false, message: "", onConfirm: null });
+
+  // Trạng thái Trò chơi Momo Runner
+  const [runnerStep, setRunnerStep] = useState("playing"); // "playing" | "summary"
+  const [runnerScore, setRunnerScore] = useState(0);
+  const [runnerCoins, setRunnerCoins] = useState(0);
+  const [runnerCombo, setRunnerCombo] = useState(0);
+  const [runnerLives, setRunnerLives] = useState(3);
+  const [runnerQuestions, setRunnerQuestions] = useState([]);
+  const runnerCanvasRef = React.useRef(null);
 
   // Game Timer Hook
   useEffect(() => {
@@ -258,8 +268,8 @@ const Module = () => {
         const updated = prevWords
           .map((w) => {
             if (w.isFading) return w;
-            // Gradually speed up based on current score
-            const currentSpeed = w.speed * (1 + gravityScoreRef.current * 0.02);
+            // Gradually speed up based on current score (4% increase per correct answer)
+            const currentSpeed = w.speed * (1 + (gravityScoreRef.current / 100) * 0.04);
             const newY = w.y + currentSpeed * deltaTime;
             return { ...w, y: newY };
           })
@@ -317,7 +327,8 @@ const Module = () => {
   useEffect(() => {
     let spawnIntervalId = null;
     if (isPlayingGame && gameMode === "gravity" && gravityStep === "playing" && gravityLives > 0) {
-      const spawnInterval = Math.max(1200, 3000 - gravityScore * 100);
+      // Balanced spawn rate acceleration: start at 3.0 seconds, decrease by 100ms per correct answer, down to a minimum of 1.5 seconds.
+      const spawnInterval = Math.max(1500, 3000 - (gravityScore / 100) * 100);
       spawnIntervalId = setInterval(() => {
         spawnNewWord();
       }, spawnInterval);
@@ -354,7 +365,7 @@ const Module = () => {
       answer: answerToType || "Answer",
       x: 5 + Math.random() * 70, // random x between 5% and 75%
       y: -20, // start just offscreen
-      speed: 40 + Math.random() * 20, // pixels per second
+      speed: 30 + Math.random() * 15, // pixels per second
       isFading: false
     };
   };
@@ -413,7 +424,7 @@ const Module = () => {
           answer: answerToType || "Answer",
           x: 10 + Math.random() * 60,
           y: -10,
-          speed: 50,
+          speed: 35,
           isFading: false
         }]);
         setGravitySpawnedCardIds([firstQ.cardId]);
@@ -616,9 +627,1114 @@ const Module = () => {
     }
   };
 
+  const handleStartRunnerGame = async () => {
+    setLoadingGame(true);
+    setRunnerScore(0);
+    setRunnerCoins(0);
+    setRunnerCombo(0);
+    setRunnerLives(3);
+    setRunnerStep("playing");
+    setRunnerQuestions([]);
+
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(
+        `http://localhost:8080/api/study/choice/${id}?isStarred=${gameStarredOnly}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      if (response.data.success) {
+        const questionsList = response.data.data;
+        if (questionsList.length === 0) {
+          toast.warning("Học phần không có câu hỏi phù hợp để tạo trò chơi!");
+          return;
+        }
+        setRunnerQuestions(questionsList);
+        setGameMode("runner");
+        setIsPlayingGame(true);
+        setIsGameConfigOpen(false);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Không thể tải câu hỏi trắc nghiệm!");
+    } finally {
+      setLoadingGame(false);
+    }
+  };
+
+  // --- MOMO RUNNER PHYSICS & CANVAS DRAWING LOOP ---
+  const runnerStateRef = React.useRef({
+    momo: {
+      x: 150,
+      lane: 1,
+      y: 190,
+      targetY: 190,
+      state: "running",
+      jumpTime: 0,
+      slideTime: 0,
+      invincibleTime: 0,
+      shieldTime: 0,
+      magnetTime: 0,
+      freezeTime: 0,
+      speedBoostTime: 0,
+      superTime: 0,
+      doubleExpTime: 0,
+      slowTime: 0,
+      width: 45,
+      height: 45
+    },
+    monster: {
+      distance: 135,
+      width: 60,
+      height: 70,
+      frame: 0,
+      animTime: 0
+    },
+    bgOffset1: 0,
+    bgOffset2: 0,
+    bgOffset3: 0,
+    obstacles: [],
+    coins: [],
+    gate: null,
+    nextGateDistance: 500,
+    totalDistanceScrolled: 0,
+    lastTime: 0,
+    shakeTime: 0,
+    fogTime: 0,
+    obstacleSpawnTimer: 2.0,
+    coinSpawnTimer: 1.0,
+    particleEffects: [],
+    isGameOver: false,
+    score: 0,
+    coinsCollected: 0,
+    combo: 0,
+    lives: 3,
+    notification: null
+  });
+
+  const triggerLaneChange = (direction) => {
+    const state = runnerStateRef.current;
+    if (state.isGameOver) return;
+    const nextLane = Math.max(0, Math.min(3, state.momo.lane + direction));
+    if (nextLane !== state.momo.lane) {
+      state.momo.lane = nextLane;
+      state.momo.targetY = 130 + nextLane * 60;
+    }
+  };
+
+  const triggerJump = () => {
+    const state = runnerStateRef.current;
+    if (state.isGameOver || state.momo.state !== "running") return;
+    state.momo.state = "jumping";
+    state.momo.jumpTime = 0;
+  };
+
+  const triggerSlide = () => {
+    const state = runnerStateRef.current;
+    if (state.isGameOver || state.momo.state !== "running") return;
+    state.momo.state = "sliding";
+    state.momo.slideTime = 0;
+  };
+
+  const handleCanvasClick = (e) => {
+    const canvas = runnerCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clickY = ((e.clientY - rect.top) / rect.height) * 400;
+
+    let clickedLane = -1;
+    if (clickY >= 100 && clickY < 160) clickedLane = 0;
+    else if (clickY >= 160 && clickY < 220) clickedLane = 1;
+    else if (clickY >= 220 && clickY < 280) clickedLane = 2;
+    else if (clickY >= 280 && clickY < 340) clickedLane = 3;
+
+    if (clickedLane !== -1) {
+      const state = runnerStateRef.current;
+      state.momo.lane = clickedLane;
+      state.momo.targetY = 130 + clickedLane * 60;
+    }
+  };
+
+  const updateReactStats = () => {
+    const state = runnerStateRef.current;
+    setRunnerScore(Math.round(state.score));
+    setRunnerCoins(state.coinsCollected);
+    setRunnerCombo(state.combo);
+    setRunnerLives(state.lives);
+  };
+
+  const spawnParticles = (x, y, color, count) => {
+    const state = runnerStateRef.current;
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speedVal = 40 + Math.random() * 90;
+      state.particleEffects.push({
+        x: x,
+        y: y,
+        vx: Math.cos(angle) * speedVal,
+        vy: Math.sin(angle) * speedVal,
+        color: color,
+        size: 2 + Math.random() * 4,
+        life: 0.4 + Math.random() * 0.4,
+        maxLife: 0.8
+      });
+    }
+  };
+
+  const updateRunnerPhysics = (dt) => {
+    const state = runnerStateRef.current;
+
+    if (state.momo.invincibleTime > 0) {
+      state.momo.invincibleTime -= dt;
+    }
+
+    let isSlowed = false;
+    if (state.momo.slowTime > 0) {
+      state.momo.slowTime -= dt;
+      isSlowed = true;
+    }
+
+    // Base speed starts at 180 and increases gradually with distance, capped at 380
+    const baseSpeed = 180 + Math.min(200, state.totalDistanceScrolled * 0.004);
+
+    let speed = baseSpeed;
+    if (state.momo.superTime > 0) {
+      state.momo.superTime -= dt;
+      speed = baseSpeed * 2.0;
+    } else {
+      if (state.momo.speedBoostTime > 0) {
+        state.momo.speedBoostTime -= dt;
+        speed = baseSpeed * 1.5;
+      } else if (isSlowed) {
+        speed = baseSpeed * 0.65;
+      }
+    }
+
+    if (state.momo.shieldTime > 0) state.momo.shieldTime -= dt;
+    if (state.momo.magnetTime > 0) state.momo.magnetTime -= dt;
+    if (state.momo.freezeTime > 0) state.momo.freezeTime -= dt;
+    if (state.momo.doubleExpTime > 0) state.momo.doubleExpTime -= dt;
+
+    if (state.shakeTime > 0) state.shakeTime -= dt;
+    if (state.fogTime > 0) state.fogTime -= dt;
+    if (state.notification && state.notification.time > 0) {
+      state.notification.time -= dt;
+    }
+
+    state.totalDistanceScrolled += speed * dt;
+    state.score += speed * dt * 0.05;
+    state.nextGateDistance -= speed * dt;
+
+    state.momo.y += (state.momo.targetY - state.momo.y) * 0.18;
+
+    if (state.momo.state === "jumping") {
+      state.momo.jumpTime += dt;
+      if (state.momo.jumpTime >= 0.6) {
+        state.momo.state = "running";
+        state.momo.jumpTime = 0;
+      }
+    }
+
+    if (state.momo.state === "sliding") {
+      state.momo.slideTime += dt;
+      if (state.momo.slideTime >= 0.6) {
+        state.momo.state = "running";
+        state.momo.slideTime = 0;
+      }
+    }
+
+    state.bgOffset1 = (state.bgOffset1 + speed * 0.12 * dt) % 800;
+    state.bgOffset2 = (state.bgOffset2 + speed * 0.35 * dt) % 800;
+    state.bgOffset3 = (state.bgOffset3 + speed * dt) % 800;
+
+    // Update monster animation time if not frozen
+    if (state.momo.freezeTime <= 0) {
+      state.monster.animTime = (state.monster.animTime || 0) + dt;
+    }
+
+    // Monster distance updates for buffs (speed boost, super, freeze) and recovery from far distance
+    let monsterSpeed = baseSpeed;
+    if (state.momo.freezeTime > 0) {
+      monsterSpeed = 0; // Frozen monster
+    }
+
+    let speedDiff = speed - monsterSpeed;
+
+    if (speedDiff > 0) {
+      // Momo is running faster (due to speed boost, super, or freeze) -> monster falls behind
+      state.monster.distance = Math.min(250, state.monster.distance + speedDiff * dt);
+    } else {
+      // Recovery: if monster is further than 135, slowly drift back to default 135
+      if (state.monster.distance > 135) {
+        state.monster.distance = Math.max(135, state.monster.distance - 20 * dt);
+      }
+    }
+
+    if (state.monster.distance <= 10) {
+      if (state.momo.invincibleTime <= 0) {
+        state.lives -= 1;
+        if (state.lives <= 0) {
+          state.isGameOver = true;
+          setRunnerStep("summary");
+        } else {
+          state.monster.distance = 135;
+          state.momo.invincibleTime = 2.5; // Give 2.5 seconds of invincibility
+          state.momo.slowTime = 0; // Clear slow penalty
+          state.fogTime = 0; // Clear fog penalty
+          state.shakeTime = 0.5;
+        }
+        updateReactStats();
+      } else {
+        // Reset to default distance if Momo is invincible to prevent vibration/multiple hits
+        state.monster.distance = 135;
+      }
+    }
+
+    state.coins.forEach((item) => {
+      if (state.momo.magnetTime > 0) {
+        let momoJumpY = 0;
+        if (state.momo.state === "jumping") {
+          momoJumpY = -Math.sin((state.momo.jumpTime / 0.6) * Math.PI) * 75;
+        }
+        const momoYVal = state.momo.y + momoJumpY;
+        const itemYVal = 130 + item.lane * 60;
+
+        const dx = state.momo.x - item.x;
+        const dy = momoYVal - itemYVal;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < 200) {
+          item.x += (dx / dist) * 350 * dt;
+          item.lane += (state.momo.lane - item.lane) * 0.15;
+        } else {
+          item.x -= speed * dt;
+        }
+      } else {
+        item.x -= speed * dt;
+      }
+
+      let momoJumpY = 0;
+      if (state.momo.state === "jumping") {
+        momoJumpY = -Math.sin((state.momo.jumpTime / 0.6) * Math.PI) * 75;
+      }
+      const momoYVal = state.momo.y + momoJumpY;
+      const itemYVal = 130 + Math.round(item.lane) * 60;
+
+      if (Math.abs(item.x - state.momo.x) < 26 && Math.abs(itemYVal - momoYVal) < 26) {
+        const multiplier = state.momo.doubleExpTime > 0 ? 2 : 1;
+        if (item.type === "mochi") {
+          state.coinsCollected += 2 * multiplier;
+          state.score += 50;
+          spawnParticles(item.x, itemYVal, "#ff6b9e", 8);
+        } else {
+          state.coinsCollected += 1 * multiplier;
+          state.score += 20;
+          spawnParticles(item.x, itemYVal, "#ffd43b", 5);
+        }
+        item.x = -100;
+        updateReactStats();
+      }
+    });
+    state.coins = state.coins.filter((c) => c.x > -20);
+
+    state.obstacles.forEach((obs) => {
+      obs.x -= speed * dt;
+
+      let momoJumpY = 0;
+      if (state.momo.state === "jumping") {
+        momoJumpY = -Math.sin((state.momo.jumpTime / 0.6) * Math.PI) * 75;
+      }
+      const momoYVal = state.momo.y + momoJumpY;
+      const obsYVal = 130 + obs.lane * 60;
+
+      if (Math.abs(obs.x - state.momo.x) < 28 && Math.abs(obsYVal - momoYVal) < 24) {
+        let dodged = false;
+        if (obs.type === "rock" && state.momo.state === "jumping" && momoJumpY < -24) {
+          dodged = true;
+        } else if ((obs.type === "fence" || obs.type === "bird") && state.momo.state === "sliding") {
+          dodged = true;
+        }
+
+        if (!dodged) {
+          if (state.momo.invincibleTime <= 0 && state.momo.superTime <= 0) {
+            if (state.momo.shieldTime > 0) {
+              state.momo.shieldTime = 0;
+              state.momo.invincibleTime = 1.2;
+              spawnParticles(obs.x, obsYVal, "#00bfff", 15);
+            } else {
+              state.monster.distance = Math.max(0, state.monster.distance - 45);
+              state.momo.invincibleTime = 1.8;
+              state.shakeTime = 0.5;
+              spawnParticles(obs.x, obsYVal, "#8e8e93", 10);
+
+              if (state.monster.distance <= 10) {
+                state.lives -= 1;
+                if (state.lives <= 0) {
+                  state.isGameOver = true;
+                  setRunnerStep("summary");
+                } else {
+                  state.monster.distance = 135;
+                  state.momo.invincibleTime = 2.5;
+                  state.momo.slowTime = 0;
+                  state.fogTime = 0;
+                }
+              }
+            }
+            obs.x = -100;
+            updateReactStats();
+          }
+        }
+      }
+    });
+    state.obstacles = state.obstacles.filter((o) => o.x > -20);
+
+    state.obstacleSpawnTimer -= dt;
+    if (state.obstacleSpawnTimer <= 0) {
+      // Create a safe zone of 900 units around gate spawns
+      if (!state.gate && state.nextGateDistance >= 900) {
+        const lanes = [0, 1, 2, 3];
+        const randomLane = lanes[Math.floor(Math.random() * lanes.length)];
+        const types = ["rock", "fence", "bird"];
+        const randomType = types[Math.floor(Math.random() * types.length)];
+        state.obstacles.push({
+          id: Math.random(),
+          x: 850,
+          lane: randomLane,
+          type: randomType
+        });
+
+        // Spawn interval gets shorter as baseSpeed increases (progressing difficulty)
+        const speedProgress = Math.min(1, (baseSpeed - 180) / 200);
+        const baseTimer = 2.2 - speedProgress * 1.6; // goes from 2.2 down to 0.6s
+        state.obstacleSpawnTimer = baseTimer + Math.random() * 0.8;
+      } else {
+        state.obstacleSpawnTimer = 0.5; // check soon
+      }
+    }
+
+    // Coins and mochi spawning has been completely removed to clean up tracks
+
+    if (state.nextGateDistance <= 0 && !state.gate) {
+      if (state.runnerQuestions.length > 0) {
+        if (state.currentQuestionIndex === undefined || state.currentQuestionIndex >= state.runnerQuestions.length) {
+          state.currentQuestionIndex = 0;
+        }
+        const questionObj = state.runnerQuestions[state.currentQuestionIndex];
+        state.currentQuestionIndex++;
+
+        const card = activeCards.find((c) => c.id === questionObj.cardId);
+        const correctTerm = card ? card.term : "";
+
+        state.gate = {
+          x: 850,
+          questionObj: questionObj,
+          options: questionObj.options,
+          correctAnswer: correctTerm,
+          passed: false
+        };
+        // Clear all obstacles to ensure a completely safe screen when the gate appears!
+        state.obstacles = [];
+      }
+    }
+
+    if (state.gate) {
+      state.gate.x -= speed * dt;
+
+      if (state.gate.x <= state.momo.x + 10 && !state.gate.passed) {
+        state.gate.passed = true;
+
+        const momoLane = state.momo.lane;
+        const selectedOption = state.gate.options[momoLane];
+        const isCorrect = (selectedOption === state.gate.correctAnswer);
+
+        if (isCorrect) {
+          state.score += 500;
+          // Pushing the monster back by 45 units as a correct answer reward!
+          state.monster.distance = Math.min(135, state.monster.distance + 45);
+          spawnParticles(state.momo.x + 20, state.momo.y, "#ff6b9e", 25);
+          spawnParticles(state.momo.x + 20, state.momo.y, "#ffb7ce", 15);
+
+          const rewardsList = ["shield", "freeze", "speedBoost"];
+          const reward = rewardsList[Math.floor(Math.random() * rewardsList.length)];
+
+          if (reward === "shield") {
+            state.momo.shieldTime = 12.0;
+          } else if (reward === "freeze") {
+            state.momo.freezeTime = 5.0;
+          } else if (reward === "speedBoost") {
+            state.momo.speedBoostTime = 6.0;
+          }
+        } else {
+          state.shakeTime = 0.8;
+          spawnParticles(state.momo.x, state.momo.y, "#9e2a2b", 20);
+
+          // Always move the monster closer by 45 units on wrong answer
+          state.monster.distance = Math.max(0, state.monster.distance - 45);
+
+          if (state.monster.distance <= 10) {
+            state.lives -= 1;
+            if (state.lives <= 0) {
+              state.isGameOver = true;
+              setRunnerStep("summary");
+            } else {
+              state.monster.distance = 135;
+              state.momo.invincibleTime = 2.5;
+              state.momo.slowTime = 0;
+              state.fogTime = 0;
+            }
+          } else {
+            // Apply a secondary penalty (slow or fog) if the monster hasn't caught Momo
+            const penaltiesList = ["slow", "fog"];
+            const penalty = penaltiesList[Math.floor(Math.random() * penaltiesList.length)];
+            if (penalty === "slow") {
+              state.momo.slowTime = 5.0;
+              state.momo.superTime = 0;
+              state.momo.speedBoostTime = 0;
+            } else if (penalty === "fog") {
+              state.fogTime = 6.0;
+            }
+          }
+        }
+        updateReactStats();
+      }
+
+      if (state.gate.x < -150) {
+        state.gate = null;
+        state.nextGateDistance = 1200 + Math.random() * 600;
+      }
+    }
+
+    state.particleEffects.forEach((p) => {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+    });
+    state.particleEffects = state.particleEffects.filter((p) => p.life > 0);
+  };
+
+  const drawRunnerGame = (ctx, canvas, timestamp) => {
+    const state = runnerStateRef.current;
+
+    ctx.save();
+
+    if (state.shakeTime > 0) {
+      const dx = (Math.random() - 0.5) * 8;
+      const dy = (Math.random() - 0.5) * 8;
+      ctx.translate(dx, dy);
+    }
+
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, 400);
+    skyGrad.addColorStop(0, "#ffe3ec");
+    skyGrad.addColorStop(1, "#fff0f5");
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, 800, 400);
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.6)";
+    for (let i = 0; i < 3; i++) {
+      const cx = (800 - state.bgOffset1 + i * 350) % 1000 - 100;
+      const cy = 40 + i * 20;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 30, 0, Math.PI * 2);
+      ctx.arc(cx + 25, cy - 5, 25, 0, Math.PI * 2);
+      ctx.arc(cx + 45, cy + 5, 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "#ffdae5";
+    for (let i = 0; i < 3; i++) {
+      const hx = (800 - state.bgOffset2 + i * 400) % 1200 - 200;
+      ctx.beginPath();
+      ctx.moveTo(hx, 400);
+      ctx.quadraticCurveTo(hx + 200, 200, hx + 400, 400);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "#ffb7ce";
+    for (let i = 0; i < 4; i++) {
+      const tx = (800 - state.bgOffset2 + i * 300) % 1000 - 50;
+      ctx.fillRect(tx, 300, 8, 100);
+      ctx.beginPath();
+      ctx.arc(tx + 4, 280, 25, 0, Math.PI * 2);
+      ctx.arc(tx - 15, 290, 20, 0, Math.PI * 2);
+      ctx.arc(tx + 23, 290, 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "#fce8ed";
+    ctx.fillRect(0, 100, 800, 300);
+
+    ctx.strokeStyle = "#ffe0ea";
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(0, 130 + i * 60);
+      ctx.lineTo(800, 130 + i * 60);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = "rgba(255, 137, 169, 0.25)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([20, 25]);
+    ctx.lineDashOffset = state.bgOffset3;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(0, 160 + i * 60);
+      ctx.lineTo(800, 160 + i * 60);
+      ctx.stroke();
+    }
+    ctx.setLineDash([]);
+
+    if (state.gate) {
+      const gateX = state.gate.x;
+      for (let laneIdx = 0; laneIdx < 4; laneIdx++) {
+        const laneY = 130 + laneIdx * 60;
+        const optionText = state.gate.options[laneIdx] || "";
+
+        ctx.fillStyle = "rgba(255, 107, 158, 0.08)";
+        ctx.strokeStyle = "#ff6b9e";
+        ctx.lineWidth = 4;
+
+        ctx.beginPath();
+        ctx.roundRect(gateX - 50, laneY - 24, 100, 48, 12);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = "#ff89a9";
+        ctx.beginPath();
+        ctx.arc(gateX - 50, laneY, 6, 0, Math.PI * 2);
+        ctx.arc(gateX + 50, laneY, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        let fontSize = 13;
+        if (optionText.length > 15) fontSize = 10;
+        if (optionText.length > 25) fontSize = 8;
+
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.beginPath();
+        ctx.roundRect(gateX - 45, laneY - 14, 90, 28, 8);
+        ctx.fill();
+        ctx.strokeStyle = "#ffe0ea";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = "#5a4b5e";
+        ctx.fillText(optionText, gateX, laneY);
+      }
+    }
+
+    state.coins.forEach((item) => {
+      const itemY = 130 + item.lane * 60;
+      if (item.type === "mochi") {
+        ctx.fillStyle = "#ffb7ce";
+        ctx.beginPath();
+        ctx.arc(item.x - 8, itemY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(item.x, itemY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#b8e994";
+        ctx.beginPath();
+        ctx.arc(item.x + 8, itemY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#d2b48c";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(item.x - 16, itemY);
+        ctx.lineTo(item.x + 16, itemY);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = "#ffd43b";
+        ctx.beginPath();
+        ctx.arc(item.x, itemY, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#f59f00";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 9px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("★", item.x, itemY + 0.5);
+      }
+    });
+
+    state.obstacles.forEach((obs) => {
+      const obsY = 130 + obs.lane * 60;
+      if (obs.type === "rock") {
+        ctx.fillStyle = "#8e8e93";
+        ctx.beginPath();
+        ctx.moveTo(obs.x - 18, obsY + 18);
+        ctx.lineTo(obs.x - 12, obsY - 12);
+        ctx.lineTo(obs.x + 4, obsY - 16);
+        ctx.lineTo(obs.x + 16, obsY - 4);
+        ctx.lineTo(obs.x + 18, obsY + 18);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#636366";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else if (obs.type === "fence") {
+        ctx.fillStyle = "#a1887f";
+        ctx.fillRect(obs.x - 4, obsY - 26, 8, 52);
+        ctx.fillRect(obs.x - 18, obsY - 16, 36, 6);
+        ctx.fillRect(obs.x - 18, obsY + 4, 36, 6);
+        ctx.strokeStyle = "#5d4037";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(obs.x - 18, obsY - 16, 36, 6);
+      } else if (obs.type === "bird") {
+        ctx.fillStyle = "#2c2c2e";
+        ctx.beginPath();
+        ctx.arc(obs.x, obsY, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(obs.x - 4, obsY);
+        ctx.lineTo(obs.x - 14, obsY - 12);
+        ctx.lineTo(obs.x, obsY - 4);
+        ctx.moveTo(obs.x + 4, obsY);
+        ctx.lineTo(obs.x + 14, obsY - 12);
+        ctx.lineTo(obs.x, obsY - 4);
+        ctx.fill();
+        ctx.fillStyle = "#ffd43b";
+        ctx.beginPath();
+        ctx.moveTo(obs.x - 6, obsY - 2);
+        ctx.lineTo(obs.x - 14, obsY);
+        ctx.lineTo(obs.x - 6, obsY + 2);
+        ctx.fill();
+      }
+    });
+
+    state.particleEffects.forEach((p) => {
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = p.life / p.maxLife;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1.0;
+
+    let momoJumpY = 0;
+    if (state.momo.state === "jumping") {
+      momoJumpY = -Math.sin((state.momo.jumpTime / 0.6) * Math.PI) * 75;
+    }
+    const momoX = state.momo.x;
+    const momoY = state.momo.y + momoJumpY;
+
+    let skipMomoDraw = false;
+    if (state.momo.invincibleTime > 0) {
+      if (Math.floor(state.momo.invincibleTime * 15) % 2 === 0) {
+        skipMomoDraw = true;
+      }
+    }
+
+    if (!skipMomoDraw) {
+      ctx.save();
+      ctx.translate(momoX, momoY);
+
+      if (state.momo.superTime > 0) {
+        ctx.fillStyle = "rgba(255, 215, 0, 0.3)";
+        ctx.beginPath();
+        ctx.arc(-20, 0, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255, 215, 0, 0.15)";
+        ctx.beginPath();
+        ctx.arc(-35, 3, 14, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      let w = state.momo.width;
+      let h = state.momo.height;
+      if (state.momo.state === "sliding") {
+        w = 54;
+        h = 24;
+      }
+
+      const momoGrad = ctx.createRadialGradient(-3, -3, 2, 0, 0, w / 2);
+      momoGrad.addColorStop(0, "#ffb7ce");
+      momoGrad.addColorStop(0.7, "#ff6b9e");
+      momoGrad.addColorStop(1, "#e64980");
+      ctx.fillStyle = momoGrad;
+
+      ctx.beginPath();
+      ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#ff6b9e";
+      ctx.beginPath();
+      ctx.moveTo(-w / 4, -h / 2.5);
+      ctx.quadraticCurveTo(-w / 3, -h / 1.1, -w / 6, -h / 2);
+      ctx.moveTo(w / 6, -h / 2);
+      ctx.quadraticCurveTo(w / 3, -h / 1.1, w / 4, -h / 2.5);
+      ctx.fill();
+
+      ctx.fillStyle = "#000000";
+      ctx.beginPath();
+      ctx.arc(w / 8, -h / 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(w / 3, -h / 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(w / 8 + 0.8, -h / 8 - 0.8, 1, 0, Math.PI * 2);
+      ctx.arc(w / 3 + 0.8, -h / 8 - 0.8, 1, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "rgba(255, 107, 158, 0.6)";
+      ctx.beginPath();
+      ctx.arc(w / 12, h / 16, 4, 0, Math.PI * 2);
+      ctx.arc(w / 2.6, h / 16, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(w / 4, 0, 3, 0, Math.PI);
+      ctx.stroke();
+
+      ctx.restore();
+
+      if (state.momo.shieldTime > 0) {
+        ctx.strokeStyle = "rgba(0, 191, 255, 0.8)";
+        ctx.fillStyle = "rgba(0, 191, 255, 0.15)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(momoX, momoY, 32, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      if (state.momo.superTime > 0) {
+        ctx.strokeStyle = "rgba(255, 215, 0, 0.8)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(momoX, momoY, 28 + Math.sin(timestamp * 0.02) * 3, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    const monsterX = momoX - state.monster.distance;
+    const monsterY = state.momo.y;
+
+    ctx.save();
+    ctx.translate(monsterX, monsterY);
+
+    const monsterGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, 45);
+    monsterGrad.addColorStop(0, "rgba(90, 30, 120, 0.95)");
+    monsterGrad.addColorStop(0.7, "rgba(50, 10, 80, 0.85)");
+    monsterGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
+    ctx.fillStyle = monsterGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, 50, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(50, 10, 80, 0.7)";
+    const tentacleCount = 5;
+    for (let i = 0; i < tentacleCount; i++) {
+      const angle = ((state.monster.animTime || 0) * 5 + i * (Math.PI * 2 / tentacleCount));
+      const tx = Math.cos(angle) * 30;
+      const ty = Math.sin(angle) * 30;
+      ctx.beginPath();
+      ctx.arc(tx, ty, 15, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "#ff0000";
+    ctx.beginPath();
+    ctx.ellipse(8, -8, 6, 8, Math.PI / 6, 0, Math.PI * 2);
+    ctx.ellipse(22, -8, 6, 8, -Math.PI / 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#ffd43b";
+    ctx.fillRect(11, -10, 1.5, 5);
+    ctx.fillRect(21, -10, 1.5, 5);
+
+    if (state.momo.freezeTime > 0) {
+      ctx.fillStyle = "rgba(135, 206, 250, 0.4)";
+      ctx.strokeStyle = "rgba(173, 216, 230, 0.9)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(-40, -40, 80, 80, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-30, -20); ctx.lineTo(-10, -35);
+      ctx.moveTo(25, 10); ctx.lineTo(35, -10);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+
+    if (state.fogTime > 0) {
+      const fogGrad = ctx.createRadialGradient(momoX, momoY, 120, momoX, momoY, 350);
+      fogGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
+      fogGrad.addColorStop(0.6, "rgba(40, 35, 50, 0.45)");
+      fogGrad.addColorStop(1, "rgba(20, 15, 25, 0.95)");
+      ctx.fillStyle = fogGrad;
+      ctx.fillRect(0, 0, 800, 400);
+
+      ctx.font = "italic bold 12px sans-serif";
+      ctx.fillStyle = "#ff4d79";
+      ctx.textAlign = "center";
+    }
+
+    if (state.gate) {
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+      ctx.strokeStyle = "#ff6b9e";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.roundRect(100, 14, 600, 72, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#ff6b9e";
+      ctx.font = "bold 11px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("CỔNG KIẾN THỨC", 124, 34);
+
+      ctx.fillStyle = "#5a4b5e";
+      let qText = state.gate.questionObj.question || "";
+      let qFontSize = 16;
+      if (qText.length > 50) qFontSize = 13;
+      if (qText.length > 80) qFontSize = 11;
+      ctx.font = `bold ${qFontSize}px sans-serif`;
+      ctx.fillText(qText, 124, 58);
+
+      ctx.restore();
+    }
+
+    let buffIdx = 0;
+    const drawBuff = (label, time, color) => {
+      const bx = 16 + buffIdx * 105;
+      const by = 372;
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, 95, 18, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = "bold 9px sans-serif";
+      ctx.fillStyle = "#5a4b5e";
+      ctx.textAlign = "left";
+      ctx.fillText(`${label}: ${time.toFixed(1)}s`, bx + 6, by + 12);
+      buffIdx++;
+    };
+
+    if (state.momo.superTime > 0) drawBuff("⚡ SIÊU MOMO", state.momo.superTime, "#ffd700");
+    else if (state.momo.speedBoostTime > 0) drawBuff("🚀 TĂNG TỐC", state.momo.speedBoostTime, "#fab005");
+    if (state.momo.shieldTime > 0) drawBuff("🛡️ KHIÊN", state.momo.shieldTime, "#00bfff");
+    if (state.momo.magnetTime > 0) drawBuff("🧲 NAM CHÂM", state.momo.magnetTime, "#e64980");
+    if (state.momo.freezeTime > 0) drawBuff("❄️ ĐÓNG BĂNG", state.momo.freezeTime, "#339af0");
+    if (state.momo.doubleExpTime > 0) drawBuff("🌟 X2 EXP", state.momo.doubleExpTime, "#12b886");
+
+    if (!window.lastRunnerLogTime) window.lastRunnerLogTime = 0;
+    if (timestamp - window.lastRunnerLogTime > 2000) {
+      window.lastRunnerLogTime = timestamp;
+      console.log("[Momo Runner Debug]", {
+        momo: { x: momoX, y: momoY, state: state.momo.state, width: state.momo.width, height: state.momo.height },
+        monster: { x: monsterX, y: monsterY, distance: state.monster.distance },
+        score: state.score,
+        lives: state.lives
+      });
+    }
+
+    ctx.restore();
+  };
+
+  const runnerTick = (timestamp) => {
+    const canvas = runnerCanvasRef.current;
+    if (!canvas) {
+      requestRef.current = requestAnimationFrame(runnerTick);
+      return;
+    }
+    const ctx = canvas.getContext("2d");
+    const state = runnerStateRef.current;
+
+    if (state.lastTime === 0) {
+      state.lastTime = timestamp;
+    }
+    let dt = (timestamp - state.lastTime) / 1000;
+    if (dt > 0.1) dt = 0.1;
+    state.lastTime = timestamp;
+
+    if (!state.isGameOver) {
+      updateRunnerPhysics(dt);
+    }
+
+    drawRunnerGame(ctx, canvas, timestamp);
+
+    if (!state.isGameOver) {
+      requestRef.current = requestAnimationFrame(runnerTick);
+    }
+  };
+
+  // Keyboard controls effect
+  useEffect(() => {
+    if (!isPlayingGame || gameMode !== "runner" || runnerStep !== "playing") return;
+
+    const handleKeyDown = (e) => {
+      if (["ArrowUp", "ArrowDown", "Space", "KeyW", "KeyS", "ShiftLeft", "ShiftRight", "ArrowRight"].includes(e.code) || ["ArrowUp", "ArrowDown", "Space", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+      }
+
+      if (e.code === "ArrowUp" || e.code === "KeyW") {
+        triggerLaneChange(-1);
+      } else if (e.code === "ArrowDown" || e.code === "KeyS") {
+        triggerLaneChange(1);
+      } else if (e.code === "Space") {
+        triggerJump();
+      } else if (e.code === "ShiftLeft" || e.code === "ShiftRight" || e.code === "KeyD" || e.code === "ArrowRight") {
+        triggerSlide();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPlayingGame, gameMode, runnerStep]);
+
+  // Animation Loop Effect
+  useEffect(() => {
+    if (isPlayingGame && gameMode === "runner" && runnerStep === "playing" && runnerQuestions.length > 0) {
+      const state = runnerStateRef.current;
+      state.isGameOver = false;
+      state.lastTime = 0;
+      state.score = 0;
+      state.coinsCollected = 0;
+      state.combo = 0;
+      state.lives = 3;
+      state.monster.distance = 135;
+      state.bgOffset1 = 0;
+      state.bgOffset2 = 0;
+      state.bgOffset3 = 0;
+      state.obstacles = [];
+      state.coins = [];
+      state.gate = null;
+      state.nextGateDistance = 500;
+      state.currentQuestionIndex = 0;
+      state.momo.x = 150;
+      state.momo.lane = 1;
+      state.momo.y = 190;
+      state.momo.targetY = 190;
+      state.momo.state = "running";
+      state.momo.invincibleTime = 0;
+      state.totalDistanceScrolled = 0;
+      state.obstacleSpawnTimer = 2.0;
+      state.monster.animTime = 0;
+      state.momo.shieldTime = 0;
+      state.momo.magnetTime = 0;
+      state.momo.freezeTime = 0;
+      state.momo.speedBoostTime = 0;
+      state.momo.superTime = 0;
+      state.momo.doubleExpTime = 0;
+      state.momo.slowTime = 0;
+      state.shakeTime = 0;
+      state.fogTime = 0;
+      state.particleEffects = [];
+      state.notification = null;
+      state.runnerQuestions = runnerQuestions;
+
+      updateReactStats();
+
+      requestRef.current = requestAnimationFrame(runnerTick);
+    }
+
+    return () => {
+      if (requestRef.current) {
+        cancelAnimationFrame(requestRef.current);
+        requestRef.current = null;
+      }
+    };
+  }, [isPlayingGame, gameMode, runnerStep, runnerQuestions]);
+
+  const renderRunnerGame = () => {
+    return (
+      <div className="study-game-layout game-layout runner-game-layout">
+        {/* Game Navbar */}
+        <div className="study-game-navbar game-navbar runner-navbar">
+          <button className="btn-back" onClick={() => {
+            showExitConfirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không?", () => {
+              setIsPlayingGame(false);
+            });
+          }}>
+            ← Thoát
+          </button>
+          <div className="study-game-nav-title">
+            <span>{moduleData?.name}</span>
+          </div>
+          <div className="runner-stats-header" style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+            <span className="runner-stat-val" style={{ fontWeight: "bold", color: "#fff" }}>🏆 {runnerScore}đ</span>
+            <div className="gravity-lives" style={{ display: "flex", gap: "2px" }}>
+              {Array.from({ length: 3 }).map((_, i) => (
+                <span key={i} className="heart-icon">
+                  {i < runnerLives ? "❤️" : "💔"}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* PLAYING STEP */}
+        {runnerStep === "playing" && (
+          <div className="runner-viewport">
+            <canvas
+              ref={runnerCanvasRef}
+              width={800}
+              height={400}
+              onClick={handleCanvasClick}
+              className="runner-canvas"
+            />
+          </div>
+        )}
+
+        {/* SUMMARY STEP */}
+        {runnerStep === "summary" && (
+          <div className="study-summary-container">
+            <div className="study-summary-card game-summary-card">
+              <h2>Momo Runner Hoàn Thành! 🏁</h2>
+              <p className="study-summary-subtitle">Momo đã hoàn thành chặng đua tuyệt vời!</p>
+
+              <div className="study-stats-cards-row" style={{ display: "flex", justifyContent: "center", gap: "15px", margin: "20px 0" }}>
+                <div className="study-stat-card score" style={{ background: "#fff0f5", border: "2px solid #ffe0ea", padding: "15px", borderRadius: "12px", textAlign: "center", minWidth: "100px" }}>
+                  <span className="study-stat-num" style={{ display: "block", fontSize: "24px", fontWeight: "bold", color: "#ff6b9e" }}>{runnerScore}</span>
+                  <span className="study-stat-lbl" style={{ fontSize: "11px", color: "#8c7a91" }}>Điểm số</span>
+                </div>
+              </div>
+
+              <div className="study-summary-actions game-summary-actions">
+                <button className="btn-summary-restart" onClick={handleStartRunnerGame} disabled={loadingGame}>
+                  {loadingGame ? "Đang tải... " : " Chơi lại"}
+                </button>
+                <button className="btn-summary-back" onClick={() => setIsPlayingGame(false)}>
+                  Quay về
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {renderExitConfirmModal()}
+      </div>
+    );
+  };
+
   const handleStartGame = async () => {
     if (gameMode === "gravity") {
       handleStartGravityGame();
+      return;
+    }
+    if (gameMode === "runner") {
+      handleStartRunnerGame();
       return;
     }
 
@@ -885,7 +2001,7 @@ const Module = () => {
   };
 
   const handleDeleteCard = async (cardId) => {
-    if (!window.confirm("Cậu có chắc muốn xóa thẻ này không? 🌸")) return;
+    if (!window.confirm("Cậu có chắc muốn xóa thẻ này không?")) return;
 
     try {
       const token = localStorage.getItem("token");
@@ -960,6 +2076,36 @@ const Module = () => {
     setIsFlipped(false);
   };
 
+  const showExitConfirm = (message, onConfirmAction) => {
+    setExitConfirm({
+      isOpen: true,
+      message,
+      onConfirm: () => {
+        onConfirmAction();
+        setExitConfirm({ isOpen: false, message: "", onConfirm: null });
+      }
+    });
+  };
+
+  const renderExitConfirmModal = () => {
+    if (!exitConfirm.isOpen) return null;
+    return (
+      <div className="custom-confirm-overlay" onClick={() => setExitConfirm({ isOpen: false, message: "", onConfirm: null })}>
+        <div className="custom-confirm-modal" onClick={(e) => e.stopPropagation()}>
+          <p className="custom-confirm-message">{exitConfirm.message}</p>
+          <div className="custom-confirm-actions">
+            <button className="btn-confirm-yes" onClick={exitConfirm.onConfirm}>
+              Đồng ý
+            </button>
+            <button className="btn-confirm-no" onClick={() => setExitConfirm({ isOpen: false, message: "", onConfirm: null })}>
+              Hủy bỏ
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (loading)
     return <div className="loading-text">Đang tải học phần... ⏳</div>;
   if (!moduleData) return null;
@@ -973,9 +2119,9 @@ const Module = () => {
         {/* Study Mode Navigation */}
         <div className="study-game-navbar">
           <button className="btn-back" onClick={() => {
-            if (window.confirm("Cậu có chắc chắn muốn dừng học và thoát ra ngoài không?")) {
+            showExitConfirm("Cậu có chắc chắn muốn dừng học và thoát ra ngoài không?", () => {
               handleBackToModule();
-            }
+            });
           }}>
             ← Thoát
           </button>
@@ -1157,6 +2303,7 @@ const Module = () => {
             </div>
           </div>
         )}
+        {renderExitConfirmModal()}
       </div>
     );
   }
@@ -1168,9 +2315,9 @@ const Module = () => {
           {/* Game Navbar */}
           <div className="study-game-navbar game-navbar">
             <button className="btn-back" onClick={() => {
-              if (window.confirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không? 🌸")) {
+              showExitConfirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không?", () => {
                 handleExitGame();
-              }
+              });
             }}>
               ← Thoát
             </button>
@@ -1235,6 +2382,7 @@ const Module = () => {
               </div>
             </div>
           )}
+          {renderExitConfirmModal()}
         </div>
       );
     } else if (gameMode === "gravity") {
@@ -1243,14 +2391,14 @@ const Module = () => {
           {/* Gravity Header */}
           <div className="study-game-navbar gravity-navbar">
             <button className="btn-back" onClick={() => {
-              if (window.confirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không? 🌸")) {
+              showExitConfirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không?", () => {
                 setIsPlayingGame(false);
-              }
+              });
             }}>
               ← Thoát
             </button>
             <div className="study-game-nav-title">
-              <span>🌠 Trò chơi Trọng lực</span>
+              <span>{moduleData?.name}</span>
               <span className="study-game-nav-badge">
                 Điểm: {gravityScore}
               </span>
@@ -1321,8 +2469,11 @@ const Module = () => {
               </div>
             </div>
           )}
+          {renderExitConfirmModal()}
         </div>
       );
+    } else if (gameMode === "runner") {
+      return renderRunnerGame();
     }
   }
 
@@ -1838,7 +2989,6 @@ const Module = () => {
                 <div className="study-mode-icon">📝</div>
                 <div className="study-mode-text-wrapper">
                   <h4>Trắc nghiệm</h4>
-                  <p>Chọn từ 4 phương án. Nhanh chóng và thú vị!</p>
                   {(studyStarredOnly ? starredCards.length : activeCards.length) < 4 && (
                     <span className="study-mode-warn">Cần tối thiểu 4 thẻ (Hiện có {studyStarredOnly ? starredCards.length : activeCards.length})</span>
                   )}
@@ -1852,7 +3002,6 @@ const Module = () => {
                 <div className="study-mode-icon">✍️</div>
                 <div className="study-mode-text-wrapper">
                   <h4>Tự luận</h4>
-                  <p>Tự gõ câu trả lời chính xác. Giúp nhớ sâu, nhớ lâu!</p>
                 </div>
               </div>
             </div>
@@ -1916,7 +3065,6 @@ const Module = () => {
                 <div className="study-mode-icon">🧩</div>
                 <div className="study-mode-text-wrapper">
                   <h4>Ghép từ</h4>
-                  <p>Ghép cặp Thuật ngữ và Định nghĩa chính xác nhanh nhất có thể!</p>
                 </div>
               </div>
 
@@ -1927,7 +3075,24 @@ const Module = () => {
                 <div className="study-mode-icon">🌠</div>
                 <div className="study-mode-text-wrapper">
                   <h4>Trọng lực</h4>
-                  <p>Nhập đáp án đúng trước khi các thuật ngữ rơi xuống đất!</p>
+                </div>
+              </div>
+
+              <div
+                className={`study-mode-card ${gameMode === "runner" ? "active" : ""} ${(gameStarredOnly ? starredCards.length : activeCards.length) < 4 ? "disabled" : ""}`}
+                onClick={() => {
+                  const currentTotalCount = gameStarredOnly ? starredCards.length : activeCards.length;
+                  if (currentTotalCount >= 4) {
+                    setGameMode("runner");
+                  }
+                }}
+              >
+                <div className="study-mode-icon">🏃‍♀️</div>
+                <div className="study-mode-text-wrapper">
+                  <h4>Runner</h4>
+                  {(gameStarredOnly ? starredCards.length : activeCards.length) < 4 && (
+                    <span className="study-mode-warn" style={{ fontSize: "10px", color: "#ff4d79", display: "block", marginTop: "2px" }}>Cần tối thiểu 4 thẻ</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1985,7 +3150,7 @@ const Module = () => {
                 type="button"
                 className="btn-modal-submit"
                 onClick={handleStartGame}
-                disabled={loadingGame || (gameStarredOnly && starredCards.length === 0) || (!gameStarredOnly && activeCards.length === 0)}
+                disabled={loadingGame || (gameStarredOnly && starredCards.length === 0) || (!gameStarredOnly && activeCards.length === 0) || (gameMode === "runner" && (gameStarredOnly ? starredCards.length : activeCards.length) < 4)}
               >
                 {loadingGame ? "Đang tạo trò chơi..." : "Bắt đầu"}
               </button>

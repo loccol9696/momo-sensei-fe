@@ -1,15 +1,74 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useContext } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { toast } from "react-toastify";
+import { AuthContext } from "../context/AuthContext";
 import "./Module.css";
+
+const PasswordModal = ({ isOpen, onClose, onSubmit }) => {
+  const [password, setPassword] = useState("");
+
+  if (!isOpen) return null;
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSubmit(password);
+    setPassword("");
+  };
+
+  const handleClose = () => {
+    setPassword("");
+    onClose();
+  };
+
+  return (
+    <div className="password-modal-overlay" onClick={handleClose}>
+      <div className="password-modal-content" onClick={(e) => e.stopPropagation()}>
+        <h3 className="password-modal-title">Nhập Mật Khẩu</h3>
+
+        <form onSubmit={handleSubmit}>
+          <div className="password-form-group">
+            <input
+              type="password"
+              className="password-form-input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Nhập mật khẩu..."
+              autoFocus
+              required
+            />
+          </div>
+          <div className="password-modal-actions">
+            <button
+              type="button"
+              className="btn-modal-cancel"
+              onClick={handleClose}
+            >
+              Hủy
+            </button>
+            <button
+              type="submit"
+              className="btn-modal-submit"
+            >
+              Xác nhận
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
 
 const Module = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
 
   const [moduleData, setModuleData] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Password modal states for locked module
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -35,6 +94,12 @@ const Module = () => {
   const [editTerm, setEditTerm] = useState("");
   const [editDefinition, setEditDefinition] = useState("");
   const [editImageUrl, setEditImageUrl] = useState("");
+
+  // State Sửa chung & Sắp xếp thẻ (Bulk Edit & Reorder)
+  const [isBulkEditMode, setIsBulkEditMode] = useState(false);
+  const [bulkCards, setBulkCards] = useState([]);
+  const [bulkDeletedIds, setBulkDeletedIds] = useState([]);
+  const [isBulkSaving, setIsBulkSaving] = useState(false);
 
   const [studyOnlyStarred, setStudyOnlyStarred] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -122,27 +187,70 @@ const Module = () => {
 
 
 
+  const isOwner = moduleData?.ownerId === user?.id;
   const activeCards = moduleData?.cards?.filter(card => !card.deleted && !card.isDeleted) || [];
   const starredCards = activeCards.filter(card => card.isStarred || card.starred) || [];
   const baseStudyCards = studyOnlyStarred ? activeCards.filter(card => card.isStarred || card.starred) : activeCards;
   const studyCards = isShuffled ? shuffledCards : baseStudyCards;
 
-  const fetchModule = async () => {
+  const fetchModule = async (retryPassword = null) => {
     try {
       const token = localStorage.getItem("token");
+      const urlPassword = retryPassword || sessionStorage.getItem(`module_password_${id}`) || "";
       const response = await axios.get(
-        `http://localhost:8080/api/modules/${id}`,
+        `http://localhost:8080/api/modules/${id}${urlPassword ? `?password=${encodeURIComponent(urlPassword)}` : ""}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (response.data.success) {
         setModuleData(response.data.data);
+        setIsPasswordModalOpen(false);
+        if (urlPassword) {
+          sessionStorage.setItem(`module_password_${id}`, urlPassword);
+        }
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Không thể tải học phần!");
+      const status = err.response?.status;
+      const message = err.response?.data?.message || "";
+      if (status === 403 && (message.includes("mật khẩu") || message.includes("Mật khẩu"))) {
+        sessionStorage.removeItem(`module_password_${id}`);
+        if (retryPassword) {
+          toast.error(message || "Mật khẩu không đúng!");
+        } else {
+          setIsPasswordModalOpen(true);
+        }
+        return;
+      }
+      toast.error(message || "Không thể tải học phần!");
       navigate(-1);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePasswordSubmit = (password) => {
+    fetchModule(password);
+  };
+
+  const handlePasswordCancel = () => {
+    setIsPasswordModalOpen(false);
+    navigate(-1);
+  };
+
+  const handleShareModule = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.get(
+        `http://localhost:8080/api/modules/${id}/share`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      if (response.data.success && response.data.data) {
+        const shareLink = response.data.data;
+        await navigator.clipboard.writeText(shareLink);
+        toast.success("Sao chép liên kết chia sẻ thành công!");
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Không thể chia sẻ học phần này!");
     }
   };
 
@@ -243,6 +351,8 @@ const Module = () => {
   const gravityWordsRef = React.useRef([]);
   const gravityLivesRef = React.useRef(3);
   const gravityScoreRef = React.useRef(0);
+  const gravitySpawnedCardIdsRef = React.useRef([]);
+  const studyQuestionsRef = React.useRef([]);
   const boardHeight = 440; // board play area height in px
 
   // Sync refs with states
@@ -258,48 +368,64 @@ const Module = () => {
     gravityScoreRef.current = gravityScore;
   }, [gravityScore]);
 
+  useEffect(() => {
+    gravitySpawnedCardIdsRef.current = gravitySpawnedCardIds;
+  }, [gravitySpawnedCardIds]);
+
+  useEffect(() => {
+    studyQuestionsRef.current = studyQuestions;
+  }, [studyQuestions]);
+
   // Main game tick loop at 60fps
   const gravityTick = (time) => {
     if (previousTimeRef.current !== undefined) {
       const deltaTime = (time - previousTimeRef.current) / 1000; // in seconds
 
-      setGravityWords((prevWords) => {
-        let lifeLost = false;
-        const updated = prevWords
-          .map((w) => {
-            if (w.isFading) return w;
-            // Gradually speed up based on current score (4% increase per correct answer)
-            const currentSpeed = w.speed * (1 + (gravityScoreRef.current / 100) * 0.04);
-            const newY = w.y + currentSpeed * deltaTime;
-            return { ...w, y: newY };
-          })
-          .filter((w) => {
-            // Check boundary hit
-            if (w.y >= boardHeight - 40 && !w.isFading) {
-              lifeLost = true;
-              return false; // remove
-            }
-            return true;
-          });
+      let lifeLost = false;
+      const currentWords = gravityWordsRef.current;
+      const updated = currentWords
+        .map((w) => {
+          if (w.isFading) return w;
+          // Gradually speed up based on current score (4% increase per correct answer)
+          const currentSpeed = w.speed * (1 + (gravityScoreRef.current / 100) * 0.04);
+          const newY = w.y + currentSpeed * deltaTime;
+          return { ...w, y: newY };
+        })
+        .filter((w) => {
+          // Check boundary hit
+          if (w.y >= boardHeight - 40 && !w.isFading) {
+            lifeLost = true;
+            return false; // remove
+          }
+          return true;
+        });
 
-        if (lifeLost) {
-          setGravityLives((prevLives) => {
-            const nextLives = prevLives - 1;
-            if (nextLives <= 0) {
-              setGravityStep("summary");
-              if (requestRef.current) {
-                cancelAnimationFrame(requestRef.current);
-                requestRef.current = null;
-              }
-            }
-            return nextLives;
-          });
-          setGravityFlashRed(true);
-          setTimeout(() => setGravityFlashRed(false), 200);
+      setGravityWords(updated);
+
+      // Check if game is completed (all words spawned and all cleared/answered)
+      if (updated.length === 0 && gravitySpawnedCardIdsRef.current.length >= studyQuestionsRef.current.length && studyQuestionsRef.current.length > 0) {
+        setGravityStep("summary");
+        if (requestRef.current) {
+          cancelAnimationFrame(requestRef.current);
+          requestRef.current = null;
         }
+      }
 
-        return updated;
-      });
+      if (lifeLost) {
+        setGravityLives((prevLives) => {
+          const nextLives = prevLives - 1;
+          if (nextLives <= 0) {
+            setGravityStep("summary");
+            if (requestRef.current) {
+              cancelAnimationFrame(requestRef.current);
+              requestRef.current = null;
+            }
+          }
+          return nextLives;
+        });
+        setGravityFlashRed(true);
+        setTimeout(() => setGravityFlashRed(false), 200);
+      }
     }
 
     previousTimeRef.current = time;
@@ -310,7 +436,7 @@ const Module = () => {
 
   // Trigger animation loop
   useEffect(() => {
-    if (isPlayingGame && gameMode === "gravity" && gravityStep === "playing" && gravityLives > 0) {
+    if (isPlayingGame && gameMode === "gravity" && gravityStep === "playing" && gravityLivesRef.current > 0) {
       previousTimeRef.current = performance.now();
       requestRef.current = requestAnimationFrame(gravityTick);
     }
@@ -321,7 +447,7 @@ const Module = () => {
         requestRef.current = null;
       }
     };
-  }, [isPlayingGame, gameMode, gravityStep, gravityLives]);
+  }, [isPlayingGame, gameMode, gravityStep]);
 
   // Spawning timer loop based on score difficulty
   useEffect(() => {
@@ -674,8 +800,6 @@ const Module = () => {
       invincibleTime: 0,
       shieldTime: 0,
       magnetTime: 0,
-      freezeTime: 0,
-      speedBoostTime: 0,
       superTime: 0,
       doubleExpTime: 0,
       slowTime: 0,
@@ -793,26 +917,19 @@ const Module = () => {
       isSlowed = true;
     }
 
-    // Base speed starts at 180 and increases gradually with distance, capped at 380
-    const baseSpeed = 180 + Math.min(200, state.totalDistanceScrolled * 0.004);
+    // Base speed starts at 200 and increases faster with distance, capped at 500
+    const baseSpeed = 200 + Math.min(300, state.totalDistanceScrolled * 0.015);
+
+    const isApproachingGate = !!(state.gate && !state.gate.passed && state.gate.x <= 400);
 
     let speed = baseSpeed;
-    if (state.momo.superTime > 0) {
-      state.momo.superTime -= dt;
-      speed = baseSpeed * 2.0;
+    if (isApproachingGate) {
+      speed = 130; // Slow down before the question so user has time to read and align
     } else {
-      if (state.momo.speedBoostTime > 0) {
-        state.momo.speedBoostTime -= dt;
-        speed = baseSpeed * 1.5;
-      } else if (isSlowed) {
+      if (isSlowed) {
         speed = baseSpeed * 0.65;
       }
     }
-
-    if (state.momo.shieldTime > 0) state.momo.shieldTime -= dt;
-    if (state.momo.magnetTime > 0) state.momo.magnetTime -= dt;
-    if (state.momo.freezeTime > 0) state.momo.freezeTime -= dt;
-    if (state.momo.doubleExpTime > 0) state.momo.doubleExpTime -= dt;
 
     if (state.shakeTime > 0) state.shakeTime -= dt;
     if (state.fogTime > 0) state.fogTime -= dt;
@@ -846,21 +963,18 @@ const Module = () => {
     state.bgOffset2 = (state.bgOffset2 + speed * 0.35 * dt) % 800;
     state.bgOffset3 = (state.bgOffset3 + speed * dt) % 800;
 
-    // Update monster animation time if not frozen
-    if (state.momo.freezeTime <= 0) {
-      state.monster.animTime = (state.monster.animTime || 0) + dt;
-    }
+    // Update monster animation time
+    state.monster.animTime = (state.monster.animTime || 0) + dt;
 
-    // Monster distance updates for buffs (speed boost, super, freeze) and recovery from far distance
+    // Monster distance updates and recovery from far distance
     let monsterSpeed = baseSpeed;
-    if (state.momo.freezeTime > 0) {
-      monsterSpeed = 0; // Frozen monster
+    if (isApproachingGate) {
+      monsterSpeed = 130; // Keep monster distance constant during slow down
     }
-
     let speedDiff = speed - monsterSpeed;
 
     if (speedDiff > 0) {
-      // Momo is running faster (due to speed boost, super, or freeze) -> monster falls behind
+      // Momo is running faster (due to super) -> monster falls behind
       state.monster.distance = Math.min(250, state.monster.distance + speedDiff * dt);
     } else {
       // Recovery: if monster is further than 135, slowly drift back to default 135
@@ -989,25 +1103,36 @@ const Module = () => {
 
     state.obstacleSpawnTimer -= dt;
     if (state.obstacleSpawnTimer <= 0) {
-      // Create a safe zone of 900 units around gate spawns
-      if (!state.gate && state.nextGateDistance >= 900) {
-        const lanes = [0, 1, 2, 3];
-        const randomLane = lanes[Math.floor(Math.random() * lanes.length)];
-        const types = ["rock", "fence", "bird"];
-        const randomType = types[Math.floor(Math.random() * types.length)];
-        state.obstacles.push({
-          id: Math.random(),
-          x: 850,
-          lane: randomLane,
-          type: randomType
-        });
+      // Create a safe zone of 450 units around gate spawns
+      if (!state.gate && state.nextGateDistance >= 450) {
+        const speedProgress = Math.min(1, (baseSpeed - 200) / 300);
 
-        // Spawn interval gets shorter as baseSpeed increases (progressing difficulty)
-        const speedProgress = Math.min(1, (baseSpeed - 180) / 200);
-        const baseTimer = 2.2 - speedProgress * 1.6; // goes from 2.2 down to 0.6s
-        state.obstacleSpawnTimer = baseTimer + Math.random() * 0.8;
+        // Shuffle lanes to select distinct lanes for multiple obstacles
+        const lanes = [0, 1, 2, 3];
+        for (let i = lanes.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [lanes[i], lanes[j]] = [lanes[j], lanes[i]];
+        }
+
+        // As speed/difficulty increases, there is a higher chance to spawn 2 obstacles in different lanes
+        const spawnCount = (Math.random() < speedProgress * 0.75) ? 2 : 1;
+
+        for (let i = 0; i < spawnCount; i++) {
+          const types = ["rock", "fence", "bird"];
+          const randomType = types[Math.floor(Math.random() * types.length)];
+          state.obstacles.push({
+            id: Math.random() + i,
+            x: 850,
+            lane: lanes[i],
+            type: randomType
+          });
+        }
+
+        // Spawn interval gets shorter and denser as baseSpeed increases (progressing difficulty)
+        const baseTimer = 1.6 - speedProgress * 1.25; // goes from 1.6s down to 0.35s
+        state.obstacleSpawnTimer = baseTimer + Math.random() * 0.4;
       } else {
-        state.obstacleSpawnTimer = 0.5; // check soon
+        state.obstacleSpawnTimer = 0.3; // check soon
       }
     }
 
@@ -1015,24 +1140,22 @@ const Module = () => {
 
     if (state.nextGateDistance <= 0 && !state.gate) {
       if (state.runnerQuestions.length > 0) {
-        if (state.currentQuestionIndex === undefined || state.currentQuestionIndex >= state.runnerQuestions.length) {
-          state.currentQuestionIndex = 0;
+        if (state.currentQuestionIndex < state.runnerQuestions.length) {
+          const questionObj = state.runnerQuestions[state.currentQuestionIndex];
+          state.currentQuestionIndex++;
+
+          const card = activeCards.find((c) => c.id === questionObj.cardId);
+          const correctTerm = card ? card.term : "";
+
+          state.gate = {
+            x: 850,
+            questionObj: questionObj,
+            options: questionObj.options,
+            correctAnswer: correctTerm,
+            passed: false
+          };
+          // Let the existing obstacles scroll off screen naturally; new ones are already blocked by the safe zone.
         }
-        const questionObj = state.runnerQuestions[state.currentQuestionIndex];
-        state.currentQuestionIndex++;
-
-        const card = activeCards.find((c) => c.id === questionObj.cardId);
-        const correctTerm = card ? card.term : "";
-
-        state.gate = {
-          x: 850,
-          questionObj: questionObj,
-          options: questionObj.options,
-          correctAnswer: correctTerm,
-          passed: false
-        };
-        // Clear all obstacles to ensure a completely safe screen when the gate appears!
-        state.obstacles = [];
       }
     }
 
@@ -1052,17 +1175,6 @@ const Module = () => {
           state.monster.distance = Math.min(135, state.monster.distance + 45);
           spawnParticles(state.momo.x + 20, state.momo.y, "#ff6b9e", 25);
           spawnParticles(state.momo.x + 20, state.momo.y, "#ffb7ce", 15);
-
-          const rewardsList = ["shield", "freeze", "speedBoost"];
-          const reward = rewardsList[Math.floor(Math.random() * rewardsList.length)];
-
-          if (reward === "shield") {
-            state.momo.shieldTime = 12.0;
-          } else if (reward === "freeze") {
-            state.momo.freezeTime = 5.0;
-          } else if (reward === "speedBoost") {
-            state.momo.speedBoostTime = 6.0;
-          }
         } else {
           state.shakeTime = 0.8;
           spawnParticles(state.momo.x, state.momo.y, "#9e2a2b", 20);
@@ -1088,7 +1200,6 @@ const Module = () => {
             if (penalty === "slow") {
               state.momo.slowTime = 5.0;
               state.momo.superTime = 0;
-              state.momo.speedBoostTime = 0;
             } else if (penalty === "fog") {
               state.fogTime = 6.0;
             }
@@ -1099,7 +1210,12 @@ const Module = () => {
 
       if (state.gate.x < -150) {
         state.gate = null;
-        state.nextGateDistance = 1200 + Math.random() * 600;
+        if (state.currentQuestionIndex >= state.runnerQuestions.length) {
+          state.isGameOver = true;
+          setRunnerStep("summary");
+        } else {
+          state.nextGateDistance = 1200 + Math.random() * 600;
+        }
       }
     }
 
@@ -1452,22 +1568,7 @@ const Module = () => {
     ctx.fillRect(11, -10, 1.5, 5);
     ctx.fillRect(21, -10, 1.5, 5);
 
-    if (state.momo.freezeTime > 0) {
-      ctx.fillStyle = "rgba(135, 206, 250, 0.4)";
-      ctx.strokeStyle = "rgba(173, 216, 230, 0.9)";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.roundRect(-40, -40, 80, 80, 12);
-      ctx.fill();
-      ctx.stroke();
 
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-30, -20); ctx.lineTo(-10, -35);
-      ctx.moveTo(25, 10); ctx.lineTo(35, -10);
-      ctx.stroke();
-    }
 
     ctx.restore();
 
@@ -1497,7 +1598,7 @@ const Module = () => {
       ctx.fillStyle = "#ff6b9e";
       ctx.font = "bold 11px sans-serif";
       ctx.textAlign = "left";
-      ctx.fillText("CỔNG KIẾN THỨC", 124, 34);
+      ctx.fillText("CÂU HỎI", 124, 34);
 
       ctx.fillStyle = "#5a4b5e";
       let qText = state.gate.questionObj.question || "";
@@ -1510,32 +1611,7 @@ const Module = () => {
       ctx.restore();
     }
 
-    let buffIdx = 0;
-    const drawBuff = (label, time, color) => {
-      const bx = 16 + buffIdx * 105;
-      const by = 372;
 
-      ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.roundRect(bx, by, 95, 18, 6);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.font = "bold 9px sans-serif";
-      ctx.fillStyle = "#5a4b5e";
-      ctx.textAlign = "left";
-      ctx.fillText(`${label}: ${time.toFixed(1)}s`, bx + 6, by + 12);
-      buffIdx++;
-    };
-
-    if (state.momo.superTime > 0) drawBuff("⚡ SIÊU MOMO", state.momo.superTime, "#ffd700");
-    else if (state.momo.speedBoostTime > 0) drawBuff("🚀 TĂNG TỐC", state.momo.speedBoostTime, "#fab005");
-    if (state.momo.shieldTime > 0) drawBuff("🛡️ KHIÊN", state.momo.shieldTime, "#00bfff");
-    if (state.momo.magnetTime > 0) drawBuff("🧲 NAM CHÂM", state.momo.magnetTime, "#e64980");
-    if (state.momo.freezeTime > 0) drawBuff("❄️ ĐÓNG BĂNG", state.momo.freezeTime, "#339af0");
-    if (state.momo.doubleExpTime > 0) drawBuff("🌟 X2 EXP", state.momo.doubleExpTime, "#12b886");
 
     if (!window.lastRunnerLogTime) window.lastRunnerLogTime = 0;
     if (timestamp - window.lastRunnerLogTime > 2000) {
@@ -1634,8 +1710,6 @@ const Module = () => {
       state.monster.animTime = 0;
       state.momo.shieldTime = 0;
       state.momo.magnetTime = 0;
-      state.momo.freezeTime = 0;
-      state.momo.speedBoostTime = 0;
       state.momo.superTime = 0;
       state.momo.doubleExpTime = 0;
       state.momo.slowTime = 0;
@@ -1662,7 +1736,7 @@ const Module = () => {
     return (
       <div className="study-game-layout game-layout runner-game-layout">
         {/* Game Navbar */}
-        <div className="study-game-navbar game-navbar runner-navbar">
+        <div className="study-game-navbar game-navbar runner-navbar" style={{ position: "relative" }}>
           <button className="btn-back" onClick={() => {
             showExitConfirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không?", () => {
               setIsPlayingGame(false);
@@ -1670,11 +1744,10 @@ const Module = () => {
           }}>
             ← Thoát
           </button>
-          <div className="study-game-nav-title">
+          <div className="study-game-nav-title" style={{ position: "absolute", left: "50%", transform: "translateX(-50%)" }}>
             <span>{moduleData?.name}</span>
           </div>
           <div className="runner-stats-header" style={{ display: "flex", alignItems: "center", gap: "15px" }}>
-            <span className="runner-stat-val" style={{ fontWeight: "bold", color: "#fff" }}>🏆 {runnerScore}đ</span>
             <div className="gravity-lives" style={{ display: "flex", gap: "2px" }}>
               {Array.from({ length: 3 }).map((_, i) => (
                 <span key={i} className="heart-icon">
@@ -1702,15 +1775,19 @@ const Module = () => {
         {runnerStep === "summary" && (
           <div className="study-summary-container">
             <div className="study-summary-card game-summary-card">
-              <h2>Momo Runner Hoàn Thành! 🏁</h2>
-              <p className="study-summary-subtitle">Momo đã hoàn thành chặng đua tuyệt vời!</p>
+              {runnerLives <= 0 ? (
+                <>
+                  <h2>Game Over!</h2>
+                  <p className="study-summary-subtitle">Momo đã bị quái vật đuổi kịp. Hãy thử lại nhé!</p>
+                </>
+              ) : (
+                <>
+                  <h2>Chiến Thắng!</h2>
+                  <p className="study-summary-subtitle">Momo đã xuất sắc vượt qua toàn bộ câu hỏi chặng đua!</p>
+                </>
+              )}
 
-              <div className="study-stats-cards-row" style={{ display: "flex", justifyContent: "center", gap: "15px", margin: "20px 0" }}>
-                <div className="study-stat-card score" style={{ background: "#fff0f5", border: "2px solid #ffe0ea", padding: "15px", borderRadius: "12px", textAlign: "center", minWidth: "100px" }}>
-                  <span className="study-stat-num" style={{ display: "block", fontSize: "24px", fontWeight: "bold", color: "#ff6b9e" }}>{runnerScore}</span>
-                  <span className="study-stat-lbl" style={{ fontSize: "11px", color: "#8c7a91" }}>Điểm số</span>
-                </div>
-              </div>
+
 
               <div className="study-summary-actions game-summary-actions">
                 <button className="btn-summary-restart" onClick={handleStartRunnerGame} disabled={loadingGame}>
@@ -1793,6 +1870,25 @@ const Module = () => {
     } finally {
       setLoadingGame(false);
     }
+  };
+
+  const hasNextLevel = () => {
+    const total = gameStarredOnly ? starredCards.length : activeCards.length;
+    const INITIAL_PAIRS = 4;
+    const PAIRS_STEP = 2;
+    const MAX_PAIRS = 10;
+    const levelReachMax = Math.floor((MAX_PAIRS - INITIAL_PAIRS) / PAIRS_STEP) + 1;
+
+    let currentOffset = 0;
+    if (gameLevel <= levelReachMax) {
+      currentOffset = (gameLevel - 1) * (gameLevel + 2);
+    } else {
+      const offsetAtMax = (levelReachMax - 1) * (levelReachMax + 2);
+      currentOffset = offsetAtMax + (gameLevel - levelReachMax) * MAX_PAIRS;
+    }
+
+    const cardsProcessed = currentOffset + (gameElements.length / 2);
+    return cardsProcessed < total;
   };
 
   const handleNextGameLevel = async () => {
@@ -1912,7 +2008,7 @@ const Module = () => {
         { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      toast.success("Thêm thẻ thành công! 🎉");
+      toast.success("Thêm thẻ thành công!");
       setNewTerm("");
       setNewDefinition("");
       setNewImageUrl("");
@@ -1989,7 +2085,7 @@ const Module = () => {
       );
 
       if (response.data.success) {
-        toast.success("Cập nhật thẻ thành công! 🌸");
+        toast.success("Cập nhật thẻ thành công!");
         setIsEditCardModalOpen(false);
         fetchModule();
       }
@@ -2035,6 +2131,160 @@ const Module = () => {
       }
     } catch (err) {
       toast.error(err.response?.data?.message || "Lỗi khi chuyển đổi trạng thái gắn sao.");
+    }
+  };
+
+  // --- CHẾ ĐỘ SỬA CHUNG & KÉO THẢ SẮP XẾP THẺ (BULK EDIT & DRAG-AND-DROP REORDER) ---
+  const draggedIndexRef = useRef(null);
+  const [dragEnabledIndex, setDragEnabledIndex] = useState(null);
+
+  const handleStartBulkEdit = () => {
+    setBulkCards(activeCards.map(card => ({
+      ...card,
+      isModified: false,
+      tempKey: card.id || `init-${Date.now()}-${Math.random()}`
+    })));
+    setBulkDeletedIds([]);
+    setIsBulkEditMode(true);
+  };
+
+  const handleCancelBulkEdit = () => {
+    showExitConfirm("Cậu có chắc muốn hủy các thay đổi vừa chỉnh sửa không?", () => {
+      setIsBulkEditMode(false);
+      setBulkCards([]);
+      setBulkDeletedIds([]);
+    });
+  };
+
+  const handleBulkCardChange = (index, field, value) => {
+    setBulkCards(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        [field]: value,
+        isModified: true
+      };
+      return updated;
+    });
+  };
+
+  const handleBulkAddCard = () => {
+    setBulkCards(prev => [
+      ...prev,
+      {
+        term: "",
+        definition: "",
+        imageUrl: "",
+        isModified: true,
+        tempKey: `new-${Date.now()}-${Math.random()}`
+      }
+    ]);
+  };
+
+  const handleBulkDeleteCard = (index) => {
+    const cardToDelete = bulkCards[index];
+    if (cardToDelete.id) {
+      setBulkDeletedIds(prev => [...prev, cardToDelete.id]);
+    }
+    setBulkCards(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Drag and Drop Event Handlers (Smoother swap-on-hover)
+  const handleDragStart = (e, index) => {
+    draggedIndexRef.current = index;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/html", e.currentTarget);
+    e.currentTarget.classList.add("dragging");
+  };
+
+  const handleDragEnd = (e) => {
+    e.currentTarget.classList.remove("dragging");
+    draggedIndexRef.current = null;
+    setDragEnabledIndex(null);
+  };
+
+  const handleDragOver = (e, targetIndex) => {
+    e.preventDefault();
+    const sourceIndex = draggedIndexRef.current;
+    if (sourceIndex === null || sourceIndex === undefined || sourceIndex === targetIndex) return;
+
+    setBulkCards(prev => {
+      const updated = [...prev];
+      const [draggedCard] = updated.splice(sourceIndex, 1);
+      updated.splice(targetIndex, 0, draggedCard);
+      return updated;
+    });
+
+    draggedIndexRef.current = targetIndex;
+  };
+
+  const handleSaveBulkChanges = async () => {
+    // Validation
+    for (let i = 0; i < bulkCards.length; i++) {
+      if (!bulkCards[i].term.trim() || !bulkCards[i].definition.trim()) {
+        return toast.warning(`Thẻ thứ ${i + 1} không được để trống Thuật ngữ hoặc Định nghĩa!`);
+      }
+    }
+
+    setIsBulkSaving(true);
+    try {
+      const token = localStorage.getItem("token");
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // 1. Delete cards on server
+      for (const cardId of bulkDeletedIds) {
+        await axios.delete(`http://localhost:8080/api/cards/${cardId}`, { headers });
+      }
+
+      // 2. Create new cards & Update modified ones
+      const finalOrderedIds = [];
+
+      for (const card of bulkCards) {
+        if (!card.id) {
+          // Create new card
+          const response = await axios.post(
+            `http://localhost:8080/api/modules/${id}/cards`,
+            { term: card.term, definition: card.definition, imageUrl: card.imageUrl || "" },
+            { headers }
+          );
+          if (response.data.success) {
+            const newCardObj = response.data.data;
+            if (newCardObj && newCardObj.id) {
+              finalOrderedIds.push(newCardObj.id);
+            }
+          }
+        } else {
+          // Update existing card if modified
+          if (card.isModified) {
+            await axios.put(
+              `http://localhost:8080/api/cards/${card.id}`,
+              { term: card.term, definition: card.definition, imageUrl: card.imageUrl || "" },
+              { headers }
+            );
+          }
+          finalOrderedIds.push(card.id);
+        }
+      }
+
+      // 3. Save order index on server
+      if (finalOrderedIds.length > 0) {
+        await axios.post(
+          `http://localhost:8080/api/modules/${id}/cards/reorder`,
+          finalOrderedIds,
+          { headers }
+        );
+      }
+
+      toast.success("Cập nhật học phần thành công!");
+      setIsBulkEditMode(false);
+      setBulkDeletedIds([]);
+      setBulkCards([]);
+      fetchModule();
+    } catch (err) {
+      console.error(err);
+      toast.error(err.response?.data?.message || "Có lỗi xảy ra khi lưu thay đổi.");
+    } finally {
+      setIsBulkSaving(false);
     }
   };
 
@@ -2105,6 +2355,16 @@ const Module = () => {
       </div>
     );
   };
+
+  if (isPasswordModalOpen) {
+    return (
+      <PasswordModal
+        isOpen={isPasswordModalOpen}
+        onClose={handlePasswordCancel}
+        onSubmit={handlePasswordSubmit}
+      />
+    );
+  }
 
   if (loading)
     return <div className="loading-text">Đang tải học phần... ⏳</div>;
@@ -2313,7 +2573,7 @@ const Module = () => {
       return (
         <div className="study-game-layout game-layout">
           {/* Game Navbar */}
-          <div className="study-game-navbar game-navbar">
+          <div className="study-game-navbar game-navbar" style={{ position: "relative" }}>
             <button className="btn-back" onClick={() => {
               showExitConfirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không?", () => {
                 handleExitGame();
@@ -2321,14 +2581,8 @@ const Module = () => {
             }}>
               ← Thoát
             </button>
-            <div className="study-game-nav-title">
+            <div className="study-game-nav-title" style={{ position: "absolute", left: "50%", transform: "translateX(-50%)" }}>
               <span>{moduleData?.name}</span>
-              <span className="study-game-nav-badge">
-                Màn chơi {gameLevel}
-              </span>
-            </div>
-            <div className="game-timer">
-              {gameTime.toFixed(1)}s
             </div>
           </div>
 
@@ -2363,22 +2617,22 @@ const Module = () => {
                 <h2>Màn {gameLevel} Hoàn Thành!</h2>
                 <p className="study-summary-subtitle">Chúc mừng cậu đã ghép xong tất cả các cặp thẻ!</p>
 
-                <div className="game-summary-time-box">
-                  <span className="game-summary-time-lbl">Thời gian hoàn thành:</span>
-                  <span className="game-summary-time-val">{gameTime.toFixed(1)} giây</span>
-                </div>
+
 
                 <div className="study-summary-actions game-summary-actions">
                   <button className="btn-summary-restart" onClick={handleRestartGameLevel} disabled={loadingGame}>
                     {loadingGame ? "Đang tải... " : " Chơi lại màn này"}
                   </button>
-                  <button className="btn-summary-back btn-game-next" onClick={handleNextGameLevel} disabled={loadingGame}>
-                    {loadingGame ? "Đang tải... " : "Màn tiếp theo"}
-                  </button>
+                  {hasNextLevel() ? (
+                    <button className="btn-summary-back btn-game-next" onClick={handleNextGameLevel} disabled={loadingGame}>
+                      {loadingGame ? "Đang tải... " : "Màn tiếp theo"}
+                    </button>
+                  ) : (
+                    <button className="btn-summary-back btn-game-exit" onClick={handleExitGame} disabled={loadingGame}>
+                      Quay về học phần
+                    </button>
+                  )}
                 </div>
-                <button className="btn-game-exit-text" onClick={handleExitGame} style={{ marginTop: "15px", background: "none", border: "none", color: "#8c7a91", fontWeight: "bold", cursor: "pointer" }}>
-                  Quay về học phần
-                </button>
               </div>
             </div>
           )}
@@ -2389,7 +2643,7 @@ const Module = () => {
       return (
         <div className="study-game-layout gravity-game-layout">
           {/* Gravity Header */}
-          <div className="study-game-navbar gravity-navbar">
+          <div className="study-game-navbar gravity-navbar" style={{ position: "relative" }}>
             <button className="btn-back" onClick={() => {
               showExitConfirm("Cậu có chắc chắn muốn dừng chơi và thoát ra ngoài không?", () => {
                 setIsPlayingGame(false);
@@ -2397,11 +2651,8 @@ const Module = () => {
             }}>
               ← Thoát
             </button>
-            <div className="study-game-nav-title">
+            <div className="study-game-nav-title" style={{ position: "absolute", left: "50%", transform: "translateX(-50%)" }}>
               <span>{moduleData?.name}</span>
-              <span className="study-game-nav-badge">
-                Điểm: {gravityScore}
-              </span>
             </div>
             <div className="gravity-lives">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -2450,20 +2701,24 @@ const Module = () => {
           {gravityStep === "summary" && (
             <div className="study-summary-container">
               <div className="study-summary-card gravity-summary-card">
-                <h2>Trò chơi Kết Thúc!</h2>
-                <p className="study-summary-subtitle">Cậu đã chiến đấu rất anh dũng!</p>
-
-                <div className="game-summary-time-box">
-                  <span className="game-summary-time-lbl">Điểm số đạt được:</span>
-                  <span className="game-summary-time-val">{gravityScore} điểm</span>
-                </div>
+                {gravityLives > 0 ? (
+                  <>
+                    <h2>Chúc mừng!</h2>
+                    <p className="study-summary-subtitle">Cậu đã hoàn thành xuất sắc tất cả các từ!</p>
+                  </>
+                ) : (
+                  <>
+                    <h2>Trò chơi Kết Thúc!</h2>
+                    <p className="study-summary-subtitle">Cậu đã chiến đấu rất anh dũng!</p>
+                  </>
+                )}
 
                 <div className="study-summary-actions game-summary-actions">
                   <button className="btn-summary-restart" onClick={handleStartGravityGame} disabled={loadingGame}>
-                    {loadingGame ? "Đang tải... " : " Chơi lại"}
+                    {loadingGame ? "Đang tải... " : "Chơi lại"}
                   </button>
                   <button className="btn-summary-back" onClick={() => setIsPlayingGame(false)}>
-                    Quay về
+                    Quay về học phần
                   </button>
                 </div>
               </div>
@@ -2472,8 +2727,6 @@ const Module = () => {
           {renderExitConfirmModal()}
         </div>
       );
-    } else if (gameMode === "runner") {
-      return renderRunnerGame();
     }
   }
 
@@ -2859,6 +3112,25 @@ const Module = () => {
                   </svg>
                 </button>
                 <button
+                  className="btn-flashcard-action btn-flashcard-share"
+                  onClick={handleShareModule}
+                  title="Chia sẻ học phần"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                    <polyline points="16 6 12 2 8 6" />
+                    <line x1="12" y1="2" x2="12" y2="15" />
+                  </svg>
+                </button>
+                <button
                   className="btn-flashcard-action btn-flashcard-settings"
                   onClick={() => setIsSettingsOpen(true)}
                   title="Cài đặt thẻ ghi nhớ"
@@ -2903,66 +3175,179 @@ const Module = () => {
       {/* DANH SÁCH THẺ */}
       <div className="cards-list-section">
         <div className="cards-list-header">
-          <h3>Các thẻ trong học phần</h3>
+          <h3>Các thẻ trong học phần ({isBulkEditMode ? bulkCards.length : activeCards.length})</h3>
           <div className="header-actions">
-            <button
-              className="btn-import-cards"
-              onClick={() => setIsImportModalOpen(true)}
-            >
-              Nhập thẻ
-            </button>
-            <button
-              className="btn-add-card"
-              onClick={() => setIsCreateCardModalOpen(true)}
-            >
-              Thêm thẻ
-            </button>
+            {isOwner && (
+              isBulkEditMode ? (
+                <>
+                  <button
+                    className="btn-save-bulk"
+                    onClick={handleSaveBulkChanges}
+                    disabled={isBulkSaving}
+                  >
+                    {isBulkSaving ? "Đang lưu..." : "Lưu thay đổi"}
+                  </button>
+                  <button
+                    className="btn-cancel-bulk"
+                    onClick={handleCancelBulkEdit}
+                    disabled={isBulkSaving}
+                  >
+                    Hủy
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="btn-bulk-edit-toggle"
+                    onClick={handleStartBulkEdit}
+                  >
+                    Chỉnh sửa
+                  </button>
+                  <button
+                    className="btn-import-cards"
+                    onClick={() => setIsImportModalOpen(true)}
+                  >
+                    Nhập thẻ
+                  </button>
+                  <button
+                    className="btn-add-card"
+                    onClick={() => setIsCreateCardModalOpen(true)}
+                  >
+                    Thêm thẻ
+                  </button>
+                </>
+              )
+            )}
           </div>
         </div>
-        <div className="cards-list">
-          {activeCards.map((card, index) => (
-            <div key={card.id} className="card-list-item">
-              <div className="card-list-index">{index + 1}</div>
-              <div className="card-list-content">
-                <div className="card-list-term">{card.term}</div>
-                <div className="card-list-divider"></div>
-                <div className="card-list-def">{card.definition}</div>
+
+        {isBulkEditMode ? (
+          <div className="cards-list bulk-edit-list">
+            {bulkCards.map((card, index) => (
+              <div
+                key={card.tempKey || card.id}
+                className="card-list-item bulk-edit-item"
+                draggable={dragEnabledIndex === index}
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDrop={(e) => e.preventDefault()}
+              >
+                <div className="card-list-index">{index + 1}</div>
+                <div className="card-list-content bulk-edit-content">
+                  <div className="bulk-edit-field">
+                    <input
+                      type="text"
+                      className="bulk-edit-input"
+                      value={card.term}
+                      onChange={(e) => handleBulkCardChange(index, "term", e.target.value)}
+                      placeholder="Nhập thuật ngữ..."
+                    />
+                    <span className="bulk-edit-label">THUẬT NGỮ</span>
+                  </div>
+                  <div className="card-list-divider"></div>
+                  <div className="bulk-edit-field">
+                    <input
+                      type="text"
+                      className="bulk-edit-input"
+                      value={card.definition}
+                      onChange={(e) => handleBulkCardChange(index, "definition", e.target.value)}
+                      placeholder="Nhập định nghĩa..."
+                    />
+                    <span className="bulk-edit-label">ĐỊNH NGHĨA</span>
+                  </div>
+                </div>
+                <div className="card-list-actions bulk-edit-actions">
+                  <div
+                    className="drag-handle"
+                    title="Kéo thả để sắp xếp"
+                    onMouseEnter={() => setDragEnabledIndex(index)}
+                    onMouseLeave={() => setDragEnabledIndex(null)}
+                  >
+                    ☰
+                  </div>
+                  <button
+                    className="btn-card-action btn-card-delete"
+                    onClick={() => handleBulkDeleteCard(index)}
+                    title="Xóa thẻ"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                      <line x1="10" x2="10" y1="11" y2="17" />
+                      <line x1="14" x2="14" y1="11" y2="17" />
+                    </svg>
+                  </button>
+                </div>
               </div>
-              <div className="card-list-actions">
-                <button
-                  className={`btn-card-action btn-card-star ${(card.isStarred || card.starred) ? "starred" : ""}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleStar(card.id);
-                  }}
-                  title={(card.isStarred || card.starred) ? "Bỏ gắn sao" : "Gắn sao"}
-                >
-                  ★
-                </button>
-                <button
-                  className="btn-card-action btn-card-edit"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleOpenEditModal(card);
-                  }}
-                  title="Chỉnh sửa thẻ"
-                >
-                  ✏️
-                </button>
-                <button
-                  className="btn-card-action btn-card-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteCard(card.id);
-                  }}
-                  title="Xóa thẻ"
-                >
-                  🗑️
-                </button>
+            ))}
+            <button
+              className="btn-bulk-add-card"
+              onClick={handleBulkAddCard}
+            >
+              + Thêm thẻ
+            </button>
+          </div>
+        ) : (
+          <div className="cards-list">
+            {activeCards.map((card, index) => (
+              <div key={card.id} className="card-list-item">
+                <div className="card-list-index">{index + 1}</div>
+                <div className="card-list-content">
+                  <div className="card-list-term">{card.term}</div>
+                  <div className="card-list-divider"></div>
+                  <div className="card-list-def">{card.definition}</div>
+                </div>
+                <div className="card-list-actions">
+                  <button
+                    className={`btn-card-action btn-card-star ${(card.isStarred || card.starred) ? "starred" : ""}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleStar(card.id);
+                    }}
+                    title={(card.isStarred || card.starred) ? "Bỏ gắn sao" : "Gắn sao"}
+                  >
+                    ★
+                  </button>
+                  {isOwner && (
+                    <>
+                      <button
+                        className="btn-card-action btn-card-edit"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEditModal(card);
+                        }}
+                        title="Chỉnh sửa thẻ"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+                          <path d="m15 5 4 4" />
+                        </svg>
+                      </button>
+                      <button
+                        className="btn-card-action btn-card-delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCard(card.id);
+                        }}
+                        title="Xóa thẻ"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M3 6h18" />
+                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                          <line x1="10" x2="10" y1="11" y2="17" />
+                          <line x1="14" x2="14" y1="11" y2="17" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* MODAL CẤU HÌNH HỌC TẬP */}
@@ -2986,7 +3371,16 @@ const Module = () => {
                   if (currentTotalCount >= 4) setStudyMode("choice");
                 }}
               >
-                <div className="study-mode-icon">📝</div>
+                <div className="study-mode-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ff6b9e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 5.5L5 7.5L9 3.5" />
+                    <path d="M13 6h7" />
+                    <path d="M3 12.5L5 14.5L9 10.5" />
+                    <path d="M13 13h7" />
+                    <path d="M3 19.5L5 21.5L9 17.5" />
+                    <path d="M13 20h7" />
+                  </svg>
+                </div>
                 <div className="study-mode-text-wrapper">
                   <h4>Trắc nghiệm</h4>
                   {(studyStarredOnly ? starredCards.length : activeCards.length) < 4 && (
@@ -2999,7 +3393,12 @@ const Module = () => {
                 className={`study-mode-card ${studyMode === "write" ? "active" : ""}`}
                 onClick={() => setStudyMode("write")}
               >
-                <div className="study-mode-icon">✍️</div>
+                <div className="study-mode-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ff6b9e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </div>
                 <div className="study-mode-text-wrapper">
                   <h4>Tự luận</h4>
                 </div>
@@ -3062,7 +3461,11 @@ const Module = () => {
                 className={`study-mode-card ${gameMode === "match" ? "active" : ""}`}
                 onClick={() => setGameMode("match")}
               >
-                <div className="study-mode-icon">🧩</div>
+                <div className="study-mode-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ff6b9e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M11.5 5.5A1.5 1.5 0 0 1 13 4v0a1.5 1.5 0 0 1 1.5 1.5H18a2 2 0 0 1 2 2v3.5a1.5 1.5 0 0 1-1.5 1.5v0A1.5 1.5 0 0 1 17 13v3.5a2 2 0 0 1-2 2h-3.5a1.5 1.5 0 0 1-1.5-1.5v0A1.5 1.5 0 0 0 8.5 17H5a2 2 0 0 1-2-2v-3.5A1.5 1.5 0 0 1 4.5 10v0A1.5 1.5 0 0 0 6 8.5V5a2 2 0 0 1 2-2h3.5" />
+                  </svg>
+                </div>
                 <div className="study-mode-text-wrapper">
                   <h4>Ghép từ</h4>
                 </div>
@@ -3072,27 +3475,16 @@ const Module = () => {
                 className={`study-mode-card ${gameMode === "gravity" ? "active" : ""}`}
                 onClick={() => setGameMode("gravity")}
               >
-                <div className="study-mode-icon">🌠</div>
+                <div className="study-mode-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ff6b9e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m18 6-6 6" />
+                    <path d="M13 5l-2 2" />
+                    <path d="M19 11l-2 2" />
+                    <circle cx="8" cy="16" r="3" />
+                  </svg>
+                </div>
                 <div className="study-mode-text-wrapper">
                   <h4>Trọng lực</h4>
-                </div>
-              </div>
-
-              <div
-                className={`study-mode-card ${gameMode === "runner" ? "active" : ""} ${(gameStarredOnly ? starredCards.length : activeCards.length) < 4 ? "disabled" : ""}`}
-                onClick={() => {
-                  const currentTotalCount = gameStarredOnly ? starredCards.length : activeCards.length;
-                  if (currentTotalCount >= 4) {
-                    setGameMode("runner");
-                  }
-                }}
-              >
-                <div className="study-mode-icon">🏃‍♀️</div>
-                <div className="study-mode-text-wrapper">
-                  <h4>Runner</h4>
-                  {(gameStarredOnly ? starredCards.length : activeCards.length) < 4 && (
-                    <span className="study-mode-warn" style={{ fontSize: "10px", color: "#ff4d79", display: "block", marginTop: "2px" }}>Cần tối thiểu 4 thẻ</span>
-                  )}
                 </div>
               </div>
             </div>
@@ -3150,7 +3542,7 @@ const Module = () => {
                 type="button"
                 className="btn-modal-submit"
                 onClick={handleStartGame}
-                disabled={loadingGame || (gameStarredOnly && starredCards.length === 0) || (!gameStarredOnly && activeCards.length === 0) || (gameMode === "runner" && (gameStarredOnly ? starredCards.length : activeCards.length) < 4)}
+                disabled={loadingGame || (gameStarredOnly && starredCards.length === 0) || (!gameStarredOnly && activeCards.length === 0)}
               >
                 {loadingGame ? "Đang tạo trò chơi..." : "Bắt đầu"}
               </button>
@@ -3302,7 +3694,7 @@ const Module = () => {
             className="module-modal-content"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="module-modal-title">Chỉnh sửa thẻ ✏️</h3>
+            <h3 className="module-modal-title">Chỉnh sửa thẻ</h3>
             <form onSubmit={handleUpdateCard}>
               <div className="module-form-group">
                 <label className="module-form-label">Thuật ngữ (*)</label>
@@ -3377,7 +3769,7 @@ const Module = () => {
                   <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                   <circle cx="12" cy="12" r="3" />
                 </svg>
-                Tùy chọn Thẻ ghi nhớ
+                Tùy chọn
               </h3>
               <button
                 className="btn-settings-close"
@@ -3479,7 +3871,7 @@ const Module = () => {
                     <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
                     <path d="M3 21v-5h5" />
                   </svg>
-                  Khởi động lại Thẻ ghi nhớ
+                  Khởi động lại
                 </button>
               </div>
             </div>
@@ -3493,6 +3885,7 @@ const Module = () => {
           </div>
         </div>
       )}
+      {renderExitConfirmModal()}
     </div>
   );
 };

@@ -9,6 +9,8 @@ const Dashboard = () => {
   const handleTopicClick = (topic) => {
     if (topic === "folders") {
       navigate("/folders");
+    } else if (topic === "search") {
+      navigate("/search-modules");
     } else {
       toast.info("Tính năng này đang được phát triển, cậu chờ chút nhé!");
     }
@@ -22,6 +24,14 @@ const Dashboard = () => {
       description: "Tự tạo, quản lý và ôn tập các từ vựng theo chủ đề của riêng cậu.",
       active: true,
       badge: "Học ngay",
+    },
+    {
+      id: "search",
+      icon: "🔍",
+      title: "Tìm kiếm học phần",
+      description: "Tìm kiếm các học phần từ người khác.",
+      active: true,
+      badge: "Tìm ngay",
     },
     // {
     //   id: "cadao",

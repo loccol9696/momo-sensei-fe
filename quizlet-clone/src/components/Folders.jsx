@@ -207,7 +207,11 @@ const Folders = () => {
                 </div>
               )}
 
-              <div className="folder-icon">📁</div>
+              <div className="folder-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 24 24" fill="#fff5f7" stroke="#ff89a9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" />
+                </svg>
+              </div>
               <div className="folder-info">
                 <h4>{folder.name}</h4>
               </div>

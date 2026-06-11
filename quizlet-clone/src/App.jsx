@@ -9,6 +9,7 @@ import "react-toastify/dist/ReactToastify.css";
 import { AuthProvider } from "./context/AuthContext";
 import Module from "./components/Module";
 import Dashboard from "./components/Dashboard";
+import SearchModules from "./components/SearchModules";
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <Route path="/folders" element={<Folders />} />
           <Route path="/folders/:id" element={<FolderDetail />} />
           <Route path="/modules/:id" element={<Module />} />
+          <Route path="/search-modules" element={<SearchModules />} />
         </Routes>
       </Router>
     </AuthProvider>

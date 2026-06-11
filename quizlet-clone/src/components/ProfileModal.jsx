@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useContext } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
 import "./ProfileModal.css";
+import { AuthContext } from "../context/AuthContext";
 
 const ProfileModal = ({ isOpen, onClose }) => {
+  const { updateUser } = useContext(AuthContext);
   const [profileData, setProfileData] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("profile");
@@ -116,6 +118,11 @@ const ProfileModal = ({ isOpen, onClose }) => {
         setProfileData(updatedData);
         setAvatarPreview(updatedData.avatar);
         setSelectedFile(null);
+        updateUser({
+          name: updatedData.fullName,
+          fullName: updatedData.fullName,
+          avatar: updatedData.avatar,
+        });
       }
     } catch (err) {
       console.error(err);

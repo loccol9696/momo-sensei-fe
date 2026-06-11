@@ -278,7 +278,28 @@ const FolderDetail = () => {
                 </div>
               )}
 
-              <div className="module-icon">📝</div>
+              <div className="module-icon">
+                <svg
+                  width="42"
+                  height="42"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="svg-module-icon"
+                >
+                  <path
+                    d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z"
+                    fill="#fff5f7"
+                    stroke="#ff89a9"
+                  />
+                  <path d="M14 2v6h6" stroke="#ff89a9" />
+                  <line x1="16" y1="13" x2="8" y2="13" stroke="#ff89a9" />
+                  <line x1="16" y1="17" x2="8" y2="17" stroke="#ff89a9" />
+                  <line x1="10" y1="9" x2="8" y2="9" stroke="#ff89a9" />
+                </svg>
+              </div>
               <div className="module-info">
                 <h4>{mod.name}</h4>
                 <p>{mod.totalCards || mod.totalTerms || 0} thuật ngữ</p>
@@ -304,7 +325,7 @@ const FolderDetail = () => {
             className="module-modal-content"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="module-modal-title">Tạo Học Phần Mới 📝</h3>
+            <h3 className="module-modal-title">Tạo Học Phần</h3>
             <form onSubmit={handleCreateModule}>
               <div className="module-form-group">
                 <label className="module-form-label">Tên học phần (*)</label>

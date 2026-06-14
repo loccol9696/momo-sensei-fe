@@ -353,8 +353,8 @@ const Module = () => {
         try {
           activeAudioRef.current.pause();
           activeAudioRef.current.currentTime = 0;
-        } catch (err) {}
-        
+        } catch (err) { }
+
         activeAudioRef.current.play().catch((err) => {
           console.error("Audio playback failed:", err);
         });
@@ -366,7 +366,7 @@ const Module = () => {
         try {
           activeAudioRef.current.pause();
           activeAudioRef.current.currentTime = 0;
-        } catch (err) {}
+        } catch (err) { }
       }
 
       const audio = new Audio(audioUrl);
@@ -913,7 +913,7 @@ const Module = () => {
       delete newQ.userAnswer;
       return newQ;
     });
-    
+
     setStudyQuestions(newQuestions);
     setStudyCurrentIndex(0);
     setStudyUserAnswer("");
@@ -2579,9 +2579,6 @@ const Module = () => {
           </button>
           <div className="study-game-nav-title">
             <span>{moduleData?.name}</span>
-            <span className="study-game-nav-badge">
-              {studyMode === "choice" ? "Trắc nghiệm" : "Tự luận"}
-            </span>
           </div>
           <div style={{ width: "80px" }}></div>
         </div>
@@ -2745,7 +2742,7 @@ const Module = () => {
                     onClick={handleRestartWrongQuestions}
                     disabled={loadingQuestions}
                   >
-                    Học lại câu sai
+                    Học câu sai
                   </button>
                 )}
                 <button
@@ -3519,19 +3516,19 @@ const Module = () => {
               {moduleData.totalViews || 0} lượt xem
             </span>
             <span className="owner-subtitle-divider">•</span>
-            <span 
+            <span
               className="owner-subtitle-item owner-like-btn"
               onClick={handleToggleLikeModule}
               style={{ cursor: "pointer", transition: "all 0.2s ease" }}
             >
-              <svg 
-                xmlns="http://www.w3.org/2000/svg" 
-                viewBox="0 0 24 24" 
-                fill={moduleData?.liked ? "#ff6b9e" : "none"} 
-                stroke={moduleData?.liked ? "#ff6b9e" : "currentColor"} 
-                strokeWidth="2" 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill={moduleData?.liked ? "#ff6b9e" : "none"}
+                stroke={moduleData?.liked ? "#ff6b9e" : "currentColor"}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
                 className={`owner-icon ${moduleData?.liked ? "active heart-filled" : ""}`}
               >
                 <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />

@@ -59,10 +59,65 @@ const PasswordModal = ({ isOpen, onClose, onSubmit }) => {
   );
 };
 
+const AudioIcon = ({ size = "1.2em" }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ display: "inline-block", verticalAlign: "middle" }}
+  >
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+  </svg>
+);
+
+const CopyIcon = ({ size = "1.2em" }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.5"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={{ display: "inline-block", verticalAlign: "middle" }}
+  >
+    <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+  </svg>
+);
+
 const Module = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useContext(AuthContext);
+
+  const activeAudioRef = useRef(null);
+  const activeAudioUrlRef = useRef("");
+  const lastPlayedCardIdRef = useRef(null);
+  const lastIndexRef = useRef(-1);
+  const lastFlippedRef = useRef(null);
+
+  const handleCopyText = (e, text) => {
+    e.stopPropagation();
+    if (!text) return;
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        toast.success("Đã sao chép nội dung!");
+      })
+      .catch(() => {
+        toast.error("Không thể sao chép!");
+      });
+  };
 
   const [moduleData, setModuleData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -106,10 +161,11 @@ const Module = () => {
   const [showFirst, setShowFirst] = useState("term"); // "term" or "definition"
   const [isShuffled, setIsShuffled] = useState(false);
   const [shuffledCards, setShuffledCards] = useState([]);
+  const [noFlipTransition, setNoFlipTransition] = useState(false);
 
   // Trạng thái học tập trực tiếp (Study Mode inline)
   const [isStudyConfigOpen, setIsStudyConfigOpen] = useState(false);
-  const [studyMode, setStudyMode] = useState("choice"); // "choice" | "write"
+  const [studyMode, setStudyMode] = useState("write"); // "choice" | "write"
   const [studyStarredOnly, setStudyStarredOnly] = useState(false);
 
   const [isStudying, setIsStudying] = useState(false);
@@ -193,17 +249,49 @@ const Module = () => {
   const baseStudyCards = studyOnlyStarred ? activeCards.filter(card => card.isStarred || card.starred) : activeCards;
   const studyCards = isShuffled ? shuffledCards : baseStudyCards;
 
+  const handleToggleLikeModule = async () => {
+    if (!moduleData) return;
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.patch(
+        `/api/modules/${id}/like`,
+        {},
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+      );
+      if (response.data.success) {
+        setModuleData((prev) => ({
+          ...prev,
+          liked: !prev.liked,
+          totalLikes: prev.liked ? (prev.totalLikes || 1) - 1 : (prev.totalLikes || 0) + 1
+        }));
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Không thể yêu thích học phần này!");
+    }
+  };
+
   const fetchModule = async (retryPassword = null) => {
     try {
       const token = localStorage.getItem("token");
       const urlPassword = retryPassword || sessionStorage.getItem(`module_password_${id}`) || "";
       const response = await axios.get(
-        `http://localhost:8080/api/modules/${id}${urlPassword ? `?password=${encodeURIComponent(urlPassword)}` : ""}`,
+        `/api/modules/${id}${urlPassword ? `?password=${encodeURIComponent(urlPassword)}` : ""}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (response.data.success) {
-        setModuleData(response.data.data);
+        const data = response.data.data;
+        if (data && data.cards) {
+          data.cards.sort((a, b) => {
+            const indexA = a.orderIndex ?? 0;
+            const indexB = b.orderIndex ?? 0;
+            if (indexA !== indexB) {
+              return indexA - indexB;
+            }
+            return (a.id ?? 0) - (b.id ?? 0);
+          });
+        }
+        setModuleData(data);
         setIsPasswordModalOpen(false);
         if (urlPassword) {
           sessionStorage.setItem(`module_password_${id}`, urlPassword);
@@ -241,7 +329,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/modules/${id}/share`,
+        `/api/modules/${id}/share`,
         { headers: token ? { Authorization: `Bearer ${token}` } : {} }
       );
       if (response.data.success && response.data.data) {
@@ -254,9 +342,73 @@ const Module = () => {
     }
   };
 
+  const playTts = (text, lang) => {
+    if (!text || !text.trim()) return;
+    try {
+      const encodedText = encodeURIComponent(text.trim());
+      const queryLang = lang ? `&lang=${lang}` : "";
+      const audioUrl = `/api/tts?text=${encodedText}${queryLang}&v=1`;
+
+      if (activeAudioRef.current && activeAudioUrlRef.current === audioUrl) {
+        try {
+          activeAudioRef.current.pause();
+          activeAudioRef.current.currentTime = 0;
+        } catch (err) {}
+        
+        activeAudioRef.current.play().catch((err) => {
+          console.error("Audio playback failed:", err);
+        });
+        return;
+      }
+
+      // Dừng âm thanh đang phát trước đó nếu có
+      if (activeAudioRef.current) {
+        try {
+          activeAudioRef.current.pause();
+          activeAudioRef.current.currentTime = 0;
+        } catch (err) {}
+      }
+
+      const audio = new Audio(audioUrl);
+      activeAudioRef.current = audio;
+      activeAudioUrlRef.current = audioUrl;
+
+      audio.play().catch((err) => {
+        console.error("Audio playback failed:", err);
+      });
+    } catch (e) {
+      console.error("Failed to play audio:", e);
+    }
+  };
+
   useEffect(() => {
     fetchModule();
   }, [id]);
+
+  // Tự động phát âm thanh khi chuyển thẻ hoặc lật thẻ sang mặt tiếng Nhật
+  useEffect(() => {
+    if (isStudying || isPlayingGame) return;
+    if (slideState !== "none") return; // Ngăn tiếng khi đang chạy hiệu ứng trượt chuyển thẻ
+
+    if (studyCards && studyCards.length > 0 && studyCards[currentIndex]) {
+      const currentCard = studyCards[currentIndex];
+      const indexChanged = lastIndexRef.current !== currentIndex;
+      const flippedChanged = lastFlippedRef.current !== isFlipped;
+
+      // Cập nhật ref
+      lastIndexRef.current = currentIndex;
+      lastFlippedRef.current = isFlipped;
+
+      const isTermVisible = (showFirst === "term" && !isFlipped) || (showFirst === "definition" && isFlipped);
+
+      if (isTermVisible) {
+        // Phát khi đổi thẻ, hoặc khi người dùng lật thẻ để hiển thị tiếng Nhật (Thuật ngữ)
+        if (indexChanged || flippedChanged) {
+          playTts(currentCard?.term, "ja");
+        }
+      }
+    }
+  }, [currentIndex, isFlipped, showFirst, studyCards, isStudying, isPlayingGame, slideState]);
 
   // Synchronize shuffled cards when base study cards change
   useEffect(() => {
@@ -525,7 +677,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/study/write/${id}?isStarred=${gameStarredOnly}`,
+        `/api/study/write/${id}?isStarred=${gameStarredOnly}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -619,7 +771,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}`,
+        `/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -660,7 +812,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.post(
-        "http://localhost:8080/api/study/check",
+        "/api/study/check",
         {
           cardId: currentQuestion.cardId,
           userAnswer: answer
@@ -688,6 +840,7 @@ const Module = () => {
             wrongQuestions: [
               ...prev.wrongQuestions,
               {
+                ...currentQuestion,
                 question: currentQuestion.question,
                 correctAnswer: result.correctAnswer,
                 userAnswer: answer
@@ -726,7 +879,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}`,
+        `/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -753,6 +906,30 @@ const Module = () => {
     }
   };
 
+  const handleRestartWrongQuestions = () => {
+    const newQuestions = studyStats.wrongQuestions.map(wq => {
+      const newQ = { ...wq };
+      delete newQ.correctAnswer;
+      delete newQ.userAnswer;
+      return newQ;
+    });
+    
+    setStudyQuestions(newQuestions);
+    setStudyCurrentIndex(0);
+    setStudyUserAnswer("");
+    setStudySelectedOption("");
+    setStudyChecked(false);
+    setStudyIsCorrect(false);
+    setStudyCorrectAnswer("");
+    setStudyStats({
+      correct: 0,
+      incorrect: 0,
+      wrongQuestions: []
+    });
+    setStudyStep("playing");
+    setIsStudying(true);
+  };
+
   const handleStartRunnerGame = async () => {
     setLoadingGame(true);
     setRunnerScore(0);
@@ -765,7 +942,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/study/choice/${id}?isStarred=${gameStarredOnly}`,
+        `/api/study/choice/${id}?isStarred=${gameStarredOnly}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -1827,7 +2004,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/study/match/${id}?level=${gameLevel}&isStarred=${gameStarredOnly}`,
+        `/api/study/match/${id}?level=${gameLevel}&isStarred=${gameStarredOnly}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -1853,7 +2030,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/study/match/${id}?level=${gameLevel}&isStarred=${gameStarredOnly}`,
+        `/api/study/match/${id}?level=${gameLevel}&isStarred=${gameStarredOnly}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -1897,7 +2074,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/study/match/${id}?level=${nextLevel}&isStarred=${gameStarredOnly}`,
+        `/api/study/match/${id}?level=${nextLevel}&isStarred=${gameStarredOnly}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -1911,7 +2088,7 @@ const Module = () => {
         setGameStep("playing");
       }
     } catch (err) {
-      toast.error(err.response?.data?.message || "Cậu đã hoàn thành tất cả các màn chơi! 🎉");
+      toast.error(err.response?.data?.message || "Cậu đã hoàn thành tất cả các màn chơi!");
     } finally {
       setLoadingGame(false);
     }
@@ -1951,7 +2128,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.post(
-        "http://localhost:8080/api/study/match/check",
+        "/api/study/match/check",
         {
           firstCardId: gameSelected.cardId,
           firstCardType: gameSelected.cardType,
@@ -2003,7 +2180,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       await axios.post(
-        `http://localhost:8080/api/modules/${id}/cards`,
+        `/api/modules/${id}/cards`,
         { term: newTerm, definition: newDefinition, imageUrl: newImageUrl },
         { headers: { Authorization: `Bearer ${token}` } },
       );
@@ -2039,7 +2216,7 @@ const Module = () => {
       if (termSeparator === "\\t") finalTermSep = "\t";
 
       const response = await axios.post(
-        `http://localhost:8080/api/modules/${id}/cards/import`,
+        `/api/modules/${id}/cards/import`,
         {
           rawText,
           cardSeparator: finalCardSep,
@@ -2049,7 +2226,7 @@ const Module = () => {
       );
 
       if (response.data.success) {
-        toast.success("Nhập thẻ hàng loạt thành công! 🎉");
+        toast.success("Nhập thẻ hàng loạt thành công!");
         setRawText("");
         setIsImportModalOpen(false);
         fetchModule();
@@ -2079,7 +2256,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.put(
-        `http://localhost:8080/api/cards/${editingCardId}`,
+        `/api/cards/${editingCardId}`,
         { term: editTerm, definition: editDefinition, imageUrl: editImageUrl },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -2102,7 +2279,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.delete(
-        `http://localhost:8080/api/cards/${cardId}`,
+        `/api/cards/${cardId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -2119,10 +2296,14 @@ const Module = () => {
   };
 
   const handleToggleStar = async (cardId) => {
+    if (!user) {
+      toast.warning("Vui lòng đăng nhập để gắn sao thẻ ghi nhớ.");
+      return;
+    }
     try {
       const token = localStorage.getItem("token");
       const response = await axios.post(
-        `http://localhost:8080/api/cards/${cardId}/star`,
+        `/api/cards/${cardId}/star`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -2233,7 +2414,7 @@ const Module = () => {
 
       // 1. Delete cards on server
       for (const cardId of bulkDeletedIds) {
-        await axios.delete(`http://localhost:8080/api/cards/${cardId}`, { headers });
+        await axios.delete(`/api/cards/${cardId}`, { headers });
       }
 
       // 2. Create new cards & Update modified ones
@@ -2243,7 +2424,7 @@ const Module = () => {
         if (!card.id) {
           // Create new card
           const response = await axios.post(
-            `http://localhost:8080/api/modules/${id}/cards`,
+            `/api/modules/${id}/cards`,
             { term: card.term, definition: card.definition, imageUrl: card.imageUrl || "" },
             { headers }
           );
@@ -2257,7 +2438,7 @@ const Module = () => {
           // Update existing card if modified
           if (card.isModified) {
             await axios.put(
-              `http://localhost:8080/api/cards/${card.id}`,
+              `/api/cards/${card.id}`,
               { term: card.term, definition: card.definition, imageUrl: card.imageUrl || "" },
               { headers }
             );
@@ -2269,7 +2450,7 @@ const Module = () => {
       // 3. Save order index on server
       if (finalOrderedIds.length > 0) {
         await axios.post(
-          `http://localhost:8080/api/modules/${id}/cards/reorder`,
+          `/api/modules/${id}/cards/reorder`,
           finalOrderedIds,
           { headers }
         );
@@ -2309,11 +2490,22 @@ const Module = () => {
 
   const handleToggleShuffle = (checked) => {
     setIsShuffled(checked);
-    if (checked) {
-      setShuffledCards(shuffleArray(baseStudyCards));
+    if (isFlipped) {
+      setNoFlipTransition(true);
+      setIsFlipped(false);
+      if (checked) {
+        setShuffledCards(shuffleArray(baseStudyCards));
+      }
+      setCurrentIndex(0);
+      setTimeout(() => {
+        setNoFlipTransition(false);
+      }, 100);
+    } else {
+      if (checked) {
+        setShuffledCards(shuffleArray(baseStudyCards));
+      }
+      setCurrentIndex(0);
     }
-    setCurrentIndex(0);
-    setIsFlipped(false);
   };
 
   const handleToggleStarredOnly = (checked) => {
@@ -2412,7 +2604,9 @@ const Module = () => {
               {/* Question Text */}
               <div className="question-display-header">
                 <span className="q-label">ĐỊNH NGHĨA</span>
-                <h1 className="question-text">{currentQuestion.question}</h1>
+                <div className="question-text-wrapper" style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                  <h1 className="question-text">{currentQuestion.question}</h1>
+                </div>
               </div>
 
               <hr className="question-divider" />
@@ -2545,6 +2739,15 @@ const Module = () => {
               )}
 
               <div className="study-summary-actions">
+                {studyStats.wrongQuestions.length > 0 && (
+                  <button
+                    className="btn-summary-restart-wrong"
+                    onClick={handleRestartWrongQuestions}
+                    disabled={loadingQuestions}
+                  >
+                    Học lại câu sai
+                  </button>
+                )}
                 <button
                   className="btn-summary-restart"
                   onClick={handleRestartStudy}
@@ -2767,7 +2970,7 @@ const Module = () => {
               className={`flashcard-container fullscreen-container ${slideState !== "none" ? slideState : ""}`}
               onClick={handleFlip}
             >
-              <div className={`flashcard ${isFlipped ? "flipped" : ""} ${slideState !== "none" ? "no-transition" : ""}`}>
+              <div className={`flashcard ${isFlipped ? "flipped" : ""} ${(slideState !== "none" || noFlipTransition) ? "no-transition" : ""}`}>
                 {/* FRONT FACE */}
                 <div className="flashcard-face flashcard-front">
                   <button
@@ -2780,6 +2983,37 @@ const Module = () => {
                   >
                     ★
                   </button>
+                  {showFirst === "term" ? (
+                    <>
+                      <button
+                        className="btn-flashcard-audio"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          playTts(currentCard?.term, "ja");
+                        }}
+                        title="Phát âm tiếng Nhật"
+                      >
+                        <AudioIcon size="1.2em" />
+                      </button>
+                      <button
+                        className="btn-flashcard-copy"
+                        style={{ left: "74px" }}
+                        onClick={(e) => handleCopyText(e, currentCard?.term)}
+                        title="Sao chép từ vựng"
+                      >
+                        <CopyIcon size="1.2em" />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn-flashcard-copy"
+                      style={{ left: "20px" }}
+                      onClick={(e) => handleCopyText(e, currentCard?.definition)}
+                      title="Sao chép định nghĩa"
+                    >
+                      <CopyIcon size="1.2em" />
+                    </button>
+                  )}
                   <div className="card-text">
                     {showFirst === "term" ? currentCard?.term : currentCard?.definition}
                   </div>
@@ -2797,6 +3031,37 @@ const Module = () => {
                   >
                     ★
                   </button>
+                  {showFirst === "definition" ? (
+                    <>
+                      <button
+                        className="btn-flashcard-audio"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          playTts(currentCard?.term, "ja");
+                        }}
+                        title="Phát âm tiếng Nhật"
+                      >
+                        <AudioIcon size="1.2em" />
+                      </button>
+                      <button
+                        className="btn-flashcard-copy"
+                        style={{ left: "74px" }}
+                        onClick={(e) => handleCopyText(e, currentCard?.term)}
+                        title="Sao chép từ vựng"
+                      >
+                        <CopyIcon size="1.2em" />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="btn-flashcard-copy"
+                      style={{ left: "20px" }}
+                      onClick={(e) => handleCopyText(e, currentCard?.definition)}
+                      title="Sao chép định nghĩa"
+                    >
+                      <CopyIcon size="1.2em" />
+                    </button>
+                  )}
                   <div className="card-text">
                     {showFirst === "term" ? currentCard?.definition : currentCard?.term}
                   </div>
@@ -2914,23 +3179,7 @@ const Module = () => {
                   </label>
                 </div>
 
-                {/* Tùy chọn 2: Xáo trộn thẻ */}
-                <div className="settings-option-item">
-                  <div className="settings-option-info">
-                    <span className="settings-option-label">Xáo trộn thẻ</span>
-                    <span className="settings-option-desc">
-                      Thay đổi thứ tự xuất hiện ngẫu nhiên của các thẻ
-                    </span>
-                  </div>
-                  <label className="toggle-switch">
-                    <input
-                      type="checkbox"
-                      checked={isShuffled}
-                      onChange={(e) => handleToggleShuffle(e.target.checked)}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
-                </div>
+
 
                 {/* Tùy chọn 3: Chọn mặt hiển thị trước */}
                 <div className="settings-option-item" style={{ flexDirection: "column", alignItems: "stretch", gap: "10px" }}>
@@ -2992,12 +3241,7 @@ const Module = () => {
                 </div>
               </div>
 
-              <button
-                className="btn-settings-done"
-                onClick={() => setIsSettingsOpen(false)}
-              >
-                Hoàn tất
-              </button>
+
             </div>
           </div>
         )}
@@ -3035,11 +3279,11 @@ const Module = () => {
 
       {/* FLASHCARD */}
       {activeCards.length > 0 ? (
-        studyCards.length > 0 ? (
-          <>
+        <>
+          {studyCards.length > 0 ? (
             <div className="flashcard-wrapper">
               <div className={`flashcard-container ${slideState !== "none" ? slideState : ""}`} onClick={handleFlip}>
-                <div className={`flashcard ${isFlipped ? "flipped" : ""} ${slideState !== "none" ? "no-transition" : ""}`}>
+                <div className={`flashcard ${isFlipped ? "flipped" : ""} ${(slideState !== "none" || noFlipTransition) ? "no-transition" : ""}`}>
                   <div className="flashcard-face flashcard-front">
                     <button
                       className={`btn-flashcard-star ${(currentCard?.isStarred || currentCard?.starred) ? "starred" : ""}`}
@@ -3051,6 +3295,37 @@ const Module = () => {
                     >
                       ★
                     </button>
+                    {showFirst === "term" ? (
+                      <>
+                        <button
+                          className="btn-flashcard-audio"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playTts(currentCard?.term, "ja");
+                          }}
+                          title="Phát âm tiếng Nhật"
+                        >
+                          <AudioIcon size="1.2em" />
+                        </button>
+                        <button
+                          className="btn-flashcard-copy"
+                          style={{ left: "74px" }}
+                          onClick={(e) => handleCopyText(e, currentCard?.term)}
+                          title="Sao chép từ vựng"
+                        >
+                          <CopyIcon size="1.2em" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="btn-flashcard-copy"
+                        style={{ left: "20px" }}
+                        onClick={(e) => handleCopyText(e, currentCard?.definition)}
+                        title="Sao chép định nghĩa"
+                      >
+                        <CopyIcon size="1.2em" />
+                      </button>
+                    )}
                     <div className="card-text">
                       {showFirst === "term" ? currentCard?.term : currentCard?.definition}
                     </div>
@@ -3066,6 +3341,37 @@ const Module = () => {
                     >
                       ★
                     </button>
+                    {showFirst === "definition" ? (
+                      <>
+                        <button
+                          className="btn-flashcard-audio"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playTts(currentCard?.term, "ja");
+                          }}
+                          title="Phát âm tiếng Nhật"
+                        >
+                          <AudioIcon size="1.2em" />
+                        </button>
+                        <button
+                          className="btn-flashcard-copy"
+                          style={{ left: "74px" }}
+                          onClick={(e) => handleCopyText(e, currentCard?.term)}
+                          title="Sao chép từ vựng"
+                        >
+                          <CopyIcon size="1.2em" />
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className="btn-flashcard-copy"
+                        style={{ left: "20px" }}
+                        onClick={(e) => handleCopyText(e, currentCard?.definition)}
+                        title="Sao chép định nghĩa"
+                      >
+                        <CopyIcon size="1.2em" />
+                      </button>
+                    )}
                     <div className="card-text">
                       {showFirst === "term" ? currentCard?.definition : currentCard?.term}
                     </div>
@@ -3073,104 +3379,168 @@ const Module = () => {
                 </div>
               </div>
             </div>
-
-            <div className="flashcard-controls">
-              <button
-                className="btn-control"
-                onClick={handlePrev}
-                disabled={currentIndex === 0}
-              >
-                ⬅ Trước
-              </button>
-              <div className="card-counter">
-                {currentIndex + 1} / {studyCards.length}
-              </div>
-              <button
-                className="btn-control"
-                onClick={handleNext}
-                disabled={currentIndex === studyCards.length - 1}
-              >
-                Sau ➡
-              </button>
-
-              <div className="flashcard-action-buttons">
-                <button
-                  className="btn-flashcard-action btn-flashcard-fullscreen"
-                  onClick={toggleFullScreen}
-                  title="Mở toàn màn hình"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-                  </svg>
-                </button>
-                <button
-                  className="btn-flashcard-action btn-flashcard-share"
-                  onClick={handleShareModule}
-                  title="Chia sẻ học phần"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-                    <polyline points="16 6 12 2 8 6" />
-                    <line x1="12" y1="2" x2="12" y2="15" />
-                  </svg>
-                </button>
-                <button
-                  className="btn-flashcard-action btn-flashcard-settings"
-                  onClick={() => setIsSettingsOpen(true)}
-                  title="Cài đặt thẻ ghi nhớ"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                    <circle cx="12" cy="12" r="3" />
-                  </svg>
-                </button>
-              </div>
+          ) : (
+            <div className="empty-cards-placeholder">
+              Cậu chưa gắn sao cho thẻ nào cả. Hãy nhấn nút gắn sao trên các thẻ ở danh sách phía dưới để học riêng nhé!
             </div>
-          </>
-        ) : (
-          <div className="empty-cards-placeholder">
-            Cậu chưa gắn sao cho thẻ nào cả. Hãy nhấn nút gắn sao trên các thẻ ở danh sách phía dưới để học riêng nhé!
+          )}
+
+          <div className="flashcard-controls">
+            {studyCards.length > 0 ? (
+              <>
+                <button
+                  className="btn-control"
+                  onClick={handlePrev}
+                  disabled={currentIndex === 0}
+                >
+                  ⬅ Trước
+                </button>
+                <div className="card-counter">
+                  {currentIndex + 1} / {studyCards.length}
+                </div>
+                <button
+                  className="btn-control"
+                  onClick={handleNext}
+                  disabled={currentIndex === studyCards.length - 1}
+                >
+                  Sau ➡
+                </button>
+              </>
+            ) : (
+              <div style={{ height: "48px" }}></div>
+            )}
+
+            <div className="flashcard-action-buttons">
+              {studyCards.length > 0 && (
+                <>
+                  <button
+                    className="btn-flashcard-action btn-flashcard-fullscreen"
+                    onClick={toggleFullScreen}
+                    title="Mở toàn màn hình"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                    </svg>
+                  </button>
+                  <button
+                    className={`btn-flashcard-action btn-flashcard-shuffle ${isShuffled ? "active" : ""}`}
+                    onClick={() => handleToggleShuffle(!isShuffled)}
+                    title={isShuffled ? "Tắt xáo trộn thẻ" : "Xáo trộn thẻ"}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="16 3 21 3 21 8" />
+                      <line x1="4" y1="20" x2="21" y2="3" />
+                      <polyline points="21 16 21 21 16 21" />
+                      <line x1="15" y1="15" x2="21" y2="21" />
+                      <line x1="4" y1="4" x2="9" y2="9" />
+                    </svg>
+                  </button>
+                  <button
+                    className="btn-flashcard-action btn-flashcard-share"
+                    onClick={handleShareModule}
+                    title="Chia sẻ học phần"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                      <polyline points="16 6 12 2 8 6" />
+                      <line x1="12" y1="2" x2="12" y2="15" />
+                    </svg>
+                  </button>
+                </>
+              )}
+              <button
+                className="btn-flashcard-action btn-flashcard-settings"
+                onClick={() => setIsSettingsOpen(true)}
+                title="Cài đặt thẻ ghi nhớ"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              </button>
+            </div>
           </div>
-        )
+        </>
       ) : (
         <div className="empty-cards-placeholder">
           Học phần này chưa có thẻ nào cả.
         </div>
       )}
 
-      {/* META BOTTOM */}
-      {/* <div className="module-meta-bottom">
-        <span>
-          Tác giả: <strong>{moduleData.ownerName}</strong>
-        </span>
-        <span>👁️ {moduleData.totalViews || 0} lượt xem</span>
-        <span>❤️ {moduleData.totalLikes || 0} lượt thích</span>
-        <span>📚 {moduleData.cards?.length || 0} thẻ</span>
-      </div> */}
+      {/* THÔNG TIN TÁC GIẢ (QUIZLET STYLE) */}
+      <div className="module-owner-section">
+        <img
+          src={moduleData.ownerAvatar || `https://api.dicebear.com/7.x/adventurer/svg?seed=${moduleData.ownerName || "owner"}`}
+          alt="Owner Avatar"
+          className="owner-profile-avatar"
+        />
+        <div className="owner-profile-details">
+          <span className="owner-username">
+            {isOwner ? "Tôi" : moduleData.ownerName || "Người dùng"}
+          </span>
+          <span className="owner-subtitle">
+            <span className="owner-subtitle-item">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="owner-icon">
+                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              {moduleData.totalViews || 0} lượt xem
+            </span>
+            <span className="owner-subtitle-divider">•</span>
+            <span 
+              className="owner-subtitle-item owner-like-btn"
+              onClick={handleToggleLikeModule}
+              style={{ cursor: "pointer", transition: "all 0.2s ease" }}
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                viewBox="0 0 24 24" 
+                fill={moduleData?.liked ? "#ff6b9e" : "none"} 
+                stroke={moduleData?.liked ? "#ff6b9e" : "currentColor"} 
+                strokeWidth="2" 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                className={`owner-icon ${moduleData?.liked ? "active heart-filled" : ""}`}
+              >
+                <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+              </svg>
+              {moduleData.totalLikes || 0} lượt thích
+            </span>
+          </span>
+        </div>
+      </div>
 
       {/* DANH SÁCH THẺ */}
       <div className="cards-list-section">
@@ -3295,9 +3665,20 @@ const Module = () => {
               <div key={card.id} className="card-list-item">
                 <div className="card-list-index">{index + 1}</div>
                 <div className="card-list-content">
-                  <div className="card-list-term">{card.term}</div>
+                  <div className="card-list-text-col">
+                    <div className="card-list-term">{card.term}</div>
+                    <button
+                      className="btn-inline-audio"
+                      onClick={() => playTts(card.term, "ja")}
+                      title="Phát âm tiếng Nhật"
+                    >
+                      <AudioIcon size="1.1em" />
+                    </button>
+                  </div>
                   <div className="card-list-divider"></div>
-                  <div className="card-list-def">{card.definition}</div>
+                  <div className="card-list-text-col">
+                    <div className="card-list-def">{card.definition}</div>
+                  </div>
                 </div>
                 <div className="card-list-actions">
                   <button
@@ -3365,6 +3746,21 @@ const Module = () => {
 
             <div className="study-mode-options">
               <div
+                className={`study-mode-card ${studyMode === "write" ? "active" : ""}`}
+                onClick={() => setStudyMode("write")}
+              >
+                <div className="study-mode-icon">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ff6b9e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </div>
+                <div className="study-mode-text-wrapper">
+                  <h4>Tự luận</h4>
+                </div>
+              </div>
+
+              <div
                 className={`study-mode-card ${studyMode === "choice" ? "active" : ""} ${(studyStarredOnly ? starredCards.length : activeCards.length) < 4 ? "disabled" : ""}`}
                 onClick={() => {
                   const currentTotalCount = studyStarredOnly ? starredCards.length : activeCards.length;
@@ -3386,21 +3782,6 @@ const Module = () => {
                   {(studyStarredOnly ? starredCards.length : activeCards.length) < 4 && (
                     <span className="study-mode-warn">Cần tối thiểu 4 thẻ (Hiện có {studyStarredOnly ? starredCards.length : activeCards.length})</span>
                   )}
-                </div>
-              </div>
-
-              <div
-                className={`study-mode-card ${studyMode === "write" ? "active" : ""}`}
-                onClick={() => setStudyMode("write")}
-              >
-                <div className="study-mode-icon">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ff6b9e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </div>
-                <div className="study-mode-text-wrapper">
-                  <h4>Tự luận</h4>
                 </div>
               </div>
             </div>
@@ -3798,23 +4179,7 @@ const Module = () => {
                 </label>
               </div>
 
-              {/* Tùy chọn 2: Xáo trộn thẻ */}
-              <div className="settings-option-item">
-                <div className="settings-option-info">
-                  <span className="settings-option-label">Xáo trộn thẻ</span>
-                  <span className="settings-option-desc">
-                    Thay đổi thứ tự xuất hiện ngẫu nhiên của các thẻ
-                  </span>
-                </div>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={isShuffled}
-                    onChange={(e) => handleToggleShuffle(e.target.checked)}
-                  />
-                  <span className="toggle-slider"></span>
-                </label>
-              </div>
+
 
               {/* Tùy chọn 3: Chọn mặt hiển thị trước */}
               <div className="settings-option-item" style={{ flexDirection: "column", alignItems: "stretch", gap: "10px" }}>
@@ -3849,7 +4214,7 @@ const Module = () => {
               </div>
 
               {/* Tùy chọn 4: Khởi động lại */}
-              <div className="settings-option-item" style={{ borderTop: "2px solid #fff0f5", paddingTop: "20px", marginTop: "10px" }}>
+              <div className="settings-option-item">
                 <button
                   type="button"
                   className="btn-reset-flashcards"
@@ -3876,17 +4241,13 @@ const Module = () => {
               </div>
             </div>
 
-            <button
-              className="btn-settings-done"
-              onClick={() => setIsSettingsOpen(false)}
-            >
-              Xong
-            </button>
+
           </div>
         </div>
-      )}
+      )
+      }
       {renderExitConfirmModal()}
-    </div>
+    </div >
   );
 };
 

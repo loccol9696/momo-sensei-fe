@@ -10,6 +10,7 @@ import { AuthProvider } from "./context/AuthContext";
 import Module from "./components/Module";
 import Dashboard from "./components/Dashboard";
 import SearchModules from "./components/SearchModules";
+import AiChat from "./components/AiChat";
 
 function App() {
   return (
@@ -26,6 +27,7 @@ function App() {
           <Route path="/modules/:id" element={<Module />} />
           <Route path="/search-modules" element={<SearchModules />} />
         </Routes>
+        <AiChat />
       </Router>
     </AuthProvider>
   );

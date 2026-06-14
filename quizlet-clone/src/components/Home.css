@@ -203,3 +203,135 @@
   color: #ff6b9e;
   font-size: 15px;
 }
+
+.nav-profile-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+/* Responsive for landing page and header */
+@media (max-width: 992px) {
+  .cute-nav {
+    padding: 15px 4%;
+  }
+
+  .logo {
+    font-size: 24px;
+  }
+
+  .hero-section {
+    padding: 40px 6%;
+    gap: 30px;
+  }
+
+  .hero-content h1 {
+    font-size: 38px;
+  }
+
+  .cute-mascot {
+    font-size: 100px;
+    padding: 35px;
+    border-radius: 40px;
+  }
+}
+
+@media (max-width: 768px) {
+  .cute-nav {
+    flex-direction: column;
+    gap: 15px;
+    padding: 15px 20px;
+    text-align: center;
+  }
+
+  .nav-buttons {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .nav-buttons button {
+    margin: 0 8px;
+    padding: 8px 20px;
+    font-size: 14px;
+  }
+
+  .hero-section {
+    flex-direction: column-reverse;
+    text-align: center;
+    padding: 40px 20px;
+  }
+
+  .hero-content {
+    padding-right: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .hero-content h1 {
+    font-size: 32px;
+  }
+
+  .hero-content p {
+    font-size: 16px;
+    margin-bottom: 25px;
+  }
+
+  .cute-mascot {
+    font-size: 80px;
+    padding: 25px;
+    border-radius: 30px;
+    margin-bottom: 20px;
+  }
+
+  .features {
+    padding: 40px 20px;
+    border-top-left-radius: 30px;
+    border-top-right-radius: 30px;
+    gap: 20px;
+  }
+
+  .feature-card {
+    padding: 30px 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .logo {
+    font-size: 22px;
+  }
+
+  .nav-buttons {
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .nav-buttons button {
+    margin-left: 0;
+    margin-right: 0;
+    width: 100%;
+  }
+
+  .nav-profile-wrapper {
+    flex-direction: column;
+    width: 100%;
+    gap: 10px;
+  }
+
+  .user-profile {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hero-content h1 {
+    font-size: 28px;
+  }
+
+  .btn-start {
+    width: 100%;
+    padding: 14px 28px;
+    font-size: 16px;
+  }
+}

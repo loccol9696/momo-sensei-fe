@@ -894,7 +894,6 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
-  margin-bottom: 28px;
 }
 
 .settings-option-item {
@@ -1606,6 +1605,28 @@
   border-color: #ff89a9;
 }
 
+.btn-summary-restart-wrong {
+  flex: 1;
+  padding: 12px 20px;
+  border-radius: 12px;
+  border: 2px solid #ffe0ea;
+  background: white;
+  color: #ff9800;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.btn-summary-restart-wrong:hover {
+  background: #fff8e1;
+  border-color: #ffb74d;
+}
+
 .btn-summary-back {
   flex: 1;
   padding: 12px 20px;
@@ -2132,6 +2153,19 @@ body:has(.flashcard-fullscreen-overlay) {
   border-color: #ff89a9;
   transform: scale(1.1);
   box-shadow: 0 6px 15px rgba(255, 107, 158, 0.15);
+}
+
+.btn-flashcard-action.btn-flashcard-shuffle.active {
+  background: linear-gradient(135deg, #ff89a9, #ff6b9e);
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 4px 12px rgba(255, 107, 158, 0.25);
+}
+
+.btn-flashcard-action.btn-flashcard-shuffle.active:hover {
+  background: linear-gradient(135deg, #ff9eb8, #ff80ab);
+  transform: scale(1.1);
+  box-shadow: 0 6px 15px rgba(255, 107, 158, 0.35);
 }
 
 .btn-flashcard-action svg {
@@ -2741,8 +2775,13 @@ body:has(.flashcard-fullscreen-overlay) {
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideUp {
@@ -2750,8 +2789,302 @@ body:has(.flashcard-fullscreen-overlay) {
     transform: translateY(20px);
     opacity: 0;
   }
+
   to {
     transform: translateY(0);
     opacity: 1;
   }
-}
+}
+
+.empty-placeholder-actions {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 15px;
+}
+
+.btn-placeholder-action {
+  padding: 10px 20px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-placeholder-reset {
+  border: none;
+  background: linear-gradient(135deg, #ff89a9, #ff6b9e);
+  color: white;
+  box-shadow: 0 4px 10px rgba(255, 107, 158, 0.2);
+}
+
+.btn-placeholder-reset:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 15px rgba(255, 107, 158, 0.3);
+}
+
+.btn-placeholder-settings {
+  border: 2px solid #ffe0ea;
+  background: white;
+  color: #ff6b9e;
+}
+
+.btn-placeholder-settings:hover {
+  background: #fff0f5;
+  border-color: #ff89a9;
+  transform: translateY(-2px);
+}
+
+.module-owner-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 30px;
+  margin-bottom: 25px;
+  padding: 0 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.module-owner-section:hover {
+  transform: translateY(-2px);
+  opacity: 0.9;
+}
+
+.owner-profile-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid #ffe0ea;
+  background: #fff5f8;
+  object-fit: cover;
+}
+
+.owner-profile-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.owner-username {
+  font-size: 16px;
+  font-weight: 700;
+  color: #5a4b5e;
+}
+
+.owner-subtitle {
+  font-size: 13px;
+  color: #8c7a91;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.owner-subtitle-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.owner-icon {
+  width: 14px;
+  height: 14px;
+  color: #8c7a91;
+}
+
+.owner-subtitle-divider {
+  color: #ffe0ea;
+}
+
+/* ==========================================
+   TRANSLATION SUGGESTIONS & INLINE TRANSLATE
+   ========================================== */
+
+.translation-suggestion {
+  font-size: 13px;
+  color: #ff6b9e;
+  margin-top: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #fff0f5;
+  padding: 4px 10px;
+  border-radius: 12px;
+  border: 1px dashed #ff89a9;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.translation-suggestion:hover {
+  background: #ffe0ea;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(255, 107, 158, 0.15);
+}
+
+.translation-suggestion:active {
+  transform: translateY(0);
+}
+
+.btn-bulk-translate {
+  margin-top: 5px;
+  align-self: flex-start;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ff6b9e;
+  background: #fff0f5;
+  border: 1px solid #ffe0ea;
+  border-radius: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.2s ease;
+}
+
+.btn-bulk-translate:hover {
+  background: #ff6b9e;
+  color: white;
+  border-color: #ff6b9e;
+  box-shadow: 0 2px 6px rgba(255, 107, 158, 0.2);
+}
+
+/* TTS Pronunciation Audio Buttons */
+.btn-flashcard-audio {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid #ffe0ea;
+  color: #ff66a0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  outline: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
+
+.btn-flashcard-audio:hover {
+  transform: scale(1.15);
+  border-color: #ff4081;
+  color: white;
+  background: #ff4081;
+  box-shadow: 0 6px 15px rgba(255, 64, 129, 0.3);
+}
+
+.btn-flashcard-audio:active {
+  transform: scale(0.95);
+}
+
+.card-list-text-col {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.btn-inline-audio {
+  background: none;
+  border: none;
+  color: #ff66a0;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 16px;
+  outline: none;
+  opacity: 0.7;
+}
+
+.btn-inline-audio:hover {
+  background-color: #ffeef4;
+  color: #ff4081;
+  transform: scale(1.15);
+  opacity: 1;
+}
+
+.btn-inline-audio:active {
+  transform: scale(0.9);
+}
+
+.btn-question-audio {
+  background: #fff;
+  border: 2px solid #ffe0ea;
+  color: #ff66a0;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  font-size: 18px;
+  outline: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+  height: 40px;
+  width: 40px;
+}
+
+.btn-question-audio:hover {
+  background-color: #ff4081;
+  color: white;
+  border-color: #ff4081;
+  transform: scale(1.1);
+  box-shadow: 0 4px 10px rgba(255, 64, 129, 0.2);
+}
+
+.btn-question-audio:active {
+  transform: scale(0.95);
+}
+
+/* Copy Flashcard Content Button */
+.btn-flashcard-copy {
+  position: absolute;
+  top: 20px;
+  z-index: 20;
+  background: rgba(255, 255, 255, 0.9);
+  border: 2px solid #ffe0ea;
+  color: #ff66a0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  outline: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+}
+
+.btn-flashcard-copy:hover {
+  transform: scale(1.15);
+  border-color: #ff4081;
+  color: white;
+  background: #ff4081;
+  box-shadow: 0 6px 15px rgba(255, 64, 129, 0.3);
+}
+
+.btn-flashcard-copy:active {
+  transform: scale(0.95);
+}

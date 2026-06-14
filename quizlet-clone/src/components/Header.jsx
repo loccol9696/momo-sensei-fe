@@ -26,7 +26,7 @@ const Header = () => {
 
         <div className="nav-buttons">
           {isLoggedIn ? (
-            <div style={{ display: "flex", alignItems: "center", gap: "15px" }}>
+            <div className="nav-profile-wrapper">
               <div
                 className="user-profile"
                 onClick={() => setIsProfileOpen(true)}

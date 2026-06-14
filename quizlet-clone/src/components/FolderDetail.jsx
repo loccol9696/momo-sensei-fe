@@ -13,6 +13,8 @@ const FolderDetail = () => {
   const [modules, setModules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
 
   // State Modal tạo Module
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -45,7 +47,7 @@ const FolderDetail = () => {
         const token = localStorage.getItem("token");
         // 1. Lấy thông tin Folder
         const folderRes = await axios.get(
-          `http://localhost:8080/api/folders/${id}`,
+          `/api/folders/${id}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           },
@@ -68,26 +70,39 @@ const FolderDetail = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/folders/${id}/modules?search=${searchQuery}`,
+        `/api/folders/${id}/modules?search=${searchQuery}&page=${page}&size=18`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
       if (response.data.success) {
-        setModules(response.data.data.content || response.data.data);
+        if (response.data.data.content !== undefined) {
+          setModules(response.data.data.content);
+          setTotalPages(response.data.data.totalPages || 0);
+        } else {
+          setModules(response.data.data);
+          setTotalPages(0);
+        }
       }
     } catch (err) {
       console.error("Lỗi lấy danh sách học phần:", err);
     }
   };
 
-  // Tự động tìm kiếm khi gõ
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, []);
+
+  // Tự động tìm kiếm khi gõ hoặc đổi trang
   useEffect(() => {
     if (!loading) {
       const delayDebounceFn = setTimeout(() => fetchModules(), 300);
       return () => clearTimeout(delayDebounceFn);
     }
-  }, [searchQuery]);
+  }, [searchQuery, page]);
 
   // --- HANDLERS ---
   const resetForm = () => {
@@ -115,12 +130,12 @@ const FolderDetail = () => {
       };
 
       const response = await axios.post(
-        `http://localhost:8080/api/folders/${id}/modules`,
+        `/api/folders/${id}/modules`,
         payload,
         { headers: { Authorization: `Bearer ${token}` } },
       );
 
-      if (response.data.success) {
+      if (response.status === 200 || response.status === 201 || response.data.success) {
         toast.success("Tạo học phần thành công!");
         resetForm();
         setIsCreateModalOpen(false);
@@ -160,13 +175,13 @@ const FolderDetail = () => {
       };
 
       const response = await axios.put(
-        `http://localhost:8080/api/modules/${editingModule.id}`,
+        `/api/modules/${editingModule.id}`,
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      if (response.data.success) {
-        toast.success("Cập nhật học phần thành công! 🎉");
+      if (response.status === 200 || response.data.success) {
+        toast.success("Cập nhật học phần thành công!");
         resetForm();
         setEditingModule(null);
         setIsEditModalOpen(false);
@@ -184,11 +199,11 @@ const FolderDetail = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.delete(
-        `http://localhost:8080/api/modules/${modId}`,
+        `/api/modules/${modId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      if (response.data.success) {
-        toast.success("Xóa học phần thành công! 🎉");
+      if (response.status === 200 || response.data.success) {
+        toast.success("Xóa học phần thành công!");
         fetchModules();
       }
     } catch (err) {
@@ -216,7 +231,10 @@ const FolderDetail = () => {
             type="text"
             className="module-search-input"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0);
+            }}
             placeholder="Tìm kiếm học phần..."
             spellCheck={false}
           />
@@ -234,79 +252,101 @@ const FolderDetail = () => {
 
       {/* GRID MODULES */}
       {modules.length > 0 ? (
-        <div className="modules-grid">
-          {modules.map((mod) => (
-            <div
-              key={mod.id}
-              className="module-card"
-              onClick={() => navigate(`/modules/${mod.id}`)}
-            >
-              {/* Ellipsis options trigger button (visible on hover) */}
-              <button
-                className="module-card-options-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveDropdownModuleId(activeDropdownModuleId === mod.id ? null : mod.id);
-                }}
+        <>
+          <div className="modules-grid">
+            {modules.map((mod) => (
+              <div
+                key={mod.id}
+                className="module-card"
+                onClick={() => navigate(`/modules/${mod.id}`)}
               >
-                ⋮
-              </button>
-
-              {/* Options dropdown menu */}
-              {activeDropdownModuleId === mod.id && (
-                <div className="module-card-dropdown" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className="dropdown-item"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveDropdownModuleId(null);
-                      handleOpenEditModal(mod);
-                    }}
-                  >
-                    Chỉnh sửa
-                  </button>
-                  <button
-                    className="dropdown-item delete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveDropdownModuleId(null);
-                      handleDeleteModule(mod.id);
-                    }}
-                  >
-                    Xóa
-                  </button>
-                </div>
-              )}
-
-              <div className="module-icon">
-                <svg
-                  width="42"
-                  height="42"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="svg-module-icon"
+                {/* Ellipsis options trigger button (visible on hover) */}
+                <button
+                  className="module-card-options-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveDropdownModuleId(activeDropdownModuleId === mod.id ? null : mod.id);
+                  }}
                 >
-                  <path
-                    d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z"
-                    fill="#fff5f7"
-                    stroke="#ff89a9"
-                  />
-                  <path d="M14 2v6h6" stroke="#ff89a9" />
-                  <line x1="16" y1="13" x2="8" y2="13" stroke="#ff89a9" />
-                  <line x1="16" y1="17" x2="8" y2="17" stroke="#ff89a9" />
-                  <line x1="10" y1="9" x2="8" y2="9" stroke="#ff89a9" />
-                </svg>
+                  ⋮
+                </button>
+
+                {/* Options dropdown menu */}
+                {activeDropdownModuleId === mod.id && (
+                  <div className="module-card-dropdown" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="dropdown-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDropdownModuleId(null);
+                        handleOpenEditModal(mod);
+                      }}
+                    >
+                      Chỉnh sửa
+                    </button>
+                    <button
+                      className="dropdown-item delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDropdownModuleId(null);
+                        handleDeleteModule(mod.id);
+                      }}
+                    >
+                      Xóa
+                    </button>
+                  </div>
+                )}
+
+                <div className="module-icon">
+                  <svg
+                    width="42"
+                    height="42"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="svg-module-icon"
+                  >
+                    <path
+                      d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z"
+                      fill="#fff5f7"
+                      stroke="#ff89a9"
+                    />
+                    <path d="M14 2v6h6" stroke="#ff89a9" />
+                    <line x1="16" y1="13" x2="8" y2="13" stroke="#ff89a9" />
+                    <line x1="16" y1="17" x2="8" y2="17" stroke="#ff89a9" />
+                    <line x1="10" y1="9" x2="8" y2="9" stroke="#ff89a9" />
+                  </svg>
+                </div>
+                <div className="module-info">
+                  <h4>{mod.name}</h4>
+                  <p>{mod.totalCards || mod.totalTerms || 0} thuật ngữ</p>
+                </div>
               </div>
-              <div className="module-info">
-                <h4>{mod.name}</h4>
-                <p>{mod.totalCards || mod.totalTerms || 0} thuật ngữ</p>
-              </div>
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="pagination-container">
+              <button
+                className="btn-page"
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Trước
+              </button>
+              <span className="page-info">Trang {page + 1} / {totalPages}</span>
+              <button
+                className="btn-page"
+                disabled={page >= totalPages - 1}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Sau
+              </button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       ) : (
         <div className="empty-modules">
           {searchQuery

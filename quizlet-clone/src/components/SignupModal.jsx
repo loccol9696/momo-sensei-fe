@@ -51,7 +51,7 @@ const SignupModal = ({ isOpen, onClose, onSwitchToLogin }) => {
 
     try {
       const response = await axios.post(
-        "http://localhost:8080/api/auth/register",
+        "/api/auth/register",
         {
           fullName: fullName,
           email: email,
@@ -105,7 +105,7 @@ const SignupModal = ({ isOpen, onClose, onSwitchToLogin }) => {
 
     try {
       const response = await axios.post(
-        "http://localhost:8080/api/auth/register/verify",
+        "/api/auth/register/verify",
         {
           email: email,
           otpCode: finalOtp,

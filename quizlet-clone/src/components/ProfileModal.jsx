@@ -44,7 +44,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
     setIsLoading(true);
     try {
       const token = localStorage.getItem("token");
-      const response = await axios.get("http://localhost:8080/api/profile", {
+      const response = await axios.get("/api/profile", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.data.success) {
@@ -102,7 +102,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
       }
 
       const response = await axios.patch(
-        "http://localhost:8080/api/profile",
+        "/api/profile",
         formData,
         {
           headers: {
@@ -145,7 +145,7 @@ const ProfileModal = ({ isOpen, onClose }) => {
 
       // Gửi request lên endpoint dành riêng cho password
       const response = await axios.put(
-        "http://localhost:8080/api/profile/password",
+        "/api/profile/password",
         { oldPassword, newPassword },
         { headers: { Authorization: `Bearer ${token}` } }
       );

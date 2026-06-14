@@ -94,7 +94,7 @@ const LoginModal = ({ isOpen, onClose, onSwitchToSignup }) => {
 
     try {
       const response = await axios.post(
-        "http://localhost:8080/api/auth/login",
+        "/api/auth/login",
         {
           email: email,
           password: password,
@@ -125,7 +125,7 @@ const LoginModal = ({ isOpen, onClose, onSwitchToSignup }) => {
     setIsLoading(true);
     try {
       const response = await axios.post(
-        "http://localhost:8080/api/auth/login/google",
+        "/api/auth/login/google",
         {
           authorizationCode: authCode,
         },

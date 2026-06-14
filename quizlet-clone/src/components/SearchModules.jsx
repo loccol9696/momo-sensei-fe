@@ -72,10 +72,15 @@ const SearchModules = () => {
   const [selectedModule, setSelectedModule] = useState(null);
 
   const fetchModules = async () => {
+    if (!searchQuery.trim()) {
+      setModules([]);
+      setTotalPages(0);
+      return;
+    }
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/modules/search?search=${encodeURIComponent(searchQuery)}&page=${page}&size=6`,
+        `/api/modules/search?search=${encodeURIComponent(searchQuery)}&page=${page}&size=6`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -88,6 +93,13 @@ const SearchModules = () => {
       toast.error("Không thể lấy danh sách học phần.");
     }
   };
+
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, []);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -109,7 +121,7 @@ const SearchModules = () => {
     try {
       const token = localStorage.getItem("token");
       await axios.get(
-        `http://localhost:8080/api/modules/${selectedModule.id}?password=${encodeURIComponent(password)}`,
+        `/api/modules/${selectedModule.id}?password=${encodeURIComponent(password)}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       sessionStorage.setItem(`module_password_${selectedModule.id}`, password);
@@ -172,13 +184,21 @@ const SearchModules = () => {
                 <div key={m.id} className="search-module-card">
                   <div className="search-module-card-header">
                     <span className={`permission-badge ${badgeClass}`}>{badgeText}</span>
-                    <span className="card-count" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#ff89a9" }}>
-                        <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                      </svg>
-                      {m.totalCards || 0} thẻ
-                    </span>
+                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                      <span className="card-count" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: "#ff89a9" }}>
+                          <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                          <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                        </svg>
+                        {m.totalCards || 0} thẻ
+                      </span>
+                      <span className="card-count" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill={m.liked ? "#ff6b9e" : "none"} stroke="#ff6b9e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />
+                        </svg>
+                        {m.totalLikes || 0}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="search-module-card-body">

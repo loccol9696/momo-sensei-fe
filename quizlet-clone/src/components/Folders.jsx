@@ -4,10 +4,54 @@ import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
 import "./Folders.css";
 
+const FolderIcon = () => (
+  <svg
+    width="54"
+    height="54"
+    viewBox="0 0 64 64"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    style={{ display: "block" }}
+  >
+    {/* Folder Back Tab */}
+    <path
+      d="M6 18C6 14.6863 8.68629 12 12 12H24L30 18H52C55.3137 18 58 20.6863 58 24V48C58 51.3137 55.3137 54 52 54H12C8.68629 54 6 51.3137 6 48V18Z"
+      fill="url(#folderBackGrad)"
+      stroke="#FF89A9"
+      strokeWidth="3"
+      strokeLinejoin="round"
+    />
+    {/* Folder Front Cover */}
+    <path
+      d="M6 26C6 22.6863 8.68629 20 12 20H52C55.3137 20 58 22.6863 58 26V48C58 51.3137 55.3137 54 52 54H12C8.68629 54 6 51.3137 6 48V26Z"
+      fill="url(#folderFrontGrad)"
+      stroke="#FF89A9"
+      strokeWidth="3"
+      strokeLinejoin="round"
+    />
+    {/* Heart in the center */}
+    <path
+      d="M32 31C32 31 30.5 28.5 28.5 28.5C26.5 28.5 25 30 25 31.8C25 35 28.5 38 32 40C35.5 38 39 35 39 31.8C39 30 37.5 28.5 35.5 28.5C33.5 28.5 32 31 32 31Z"
+      fill="#FF6B9E"
+    />
+    <defs>
+      <linearGradient id="folderBackGrad" x1="6" y1="12" x2="58" y2="54" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#FFF2F6" />
+        <stop offset="100%" stopColor="#FFE5ED" />
+      </linearGradient>
+      <linearGradient id="folderFrontGrad" x1="6" y1="20" x2="58" y2="54" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stopColor="#FFE5ED" />
+        <stop offset="100%" stopColor="#FFC8D7" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
 const Folders = () => {
   const [folders, setFolders] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -34,17 +78,25 @@ const Folders = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `http://localhost:8080/api/folders?search=${searchQuery}&page=${page}&size=10`,
+        `/api/folders?search=${searchQuery}&page=${page}&size=18`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
 
       if (response.data.success) {
         setFolders(response.data.data.content);
+        setTotalPages(response.data.data.totalPages || 0);
       }
     } catch (err) {
       console.error("Lỗi lấy danh sách thư mục:", err);
     }
   };
+
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "unset";
+    };
+  }, []);
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -62,7 +114,7 @@ const Folders = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.post(
-        "http://localhost:8080/api/folders",
+        "/api/folders",
         { name: newFolderName },
         { headers: { Authorization: `Bearer ${token}` } },
       );
@@ -95,7 +147,7 @@ const Folders = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.post(
-        `http://localhost:8080/api/folders/${editingFolder.id}`,
+        `/api/folders/${editingFolder.id}`,
         { name: newFolderName },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -119,7 +171,7 @@ const Folders = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.delete(
-        `http://localhost:8080/api/folders/${folderId}`,
+        `/api/folders/${folderId}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -149,7 +201,10 @@ const Folders = () => {
             type="text"
             className="search-input"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0);
+            }}
             placeholder="Tìm kiếm thư mục..."
             spellCheck={false}
           />
@@ -163,61 +218,81 @@ const Folders = () => {
       </div>
 
       {folders.length > 0 ? (
-        <div className="folders-grid">
-          {folders.map((folder) => (
-            <div
-              key={folder.id}
-              className="folder-card"
-              onClick={() => navigate(`/folders/${folder.id}`)}
-            >
-              {/* Ellipsis options trigger button (visible on hover) */}
-              <button
-                className="folder-card-options-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setActiveDropdownFolderId(activeDropdownFolderId === folder.id ? null : folder.id);
-                }}
+        <>
+          <div className="folders-grid">
+            {folders.map((folder) => (
+              <div
+                key={folder.id}
+                className="folder-card"
+                onClick={() => navigate(`/folders/${folder.id}`)}
               >
-                ⋮
-              </button>
+                {/* Ellipsis options trigger button (visible on hover) */}
+                <button
+                  className="folder-card-options-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveDropdownFolderId(activeDropdownFolderId === folder.id ? null : folder.id);
+                  }}
+                >
+                  ⋮
+                </button>
 
-              {/* Options dropdown menu */}
-              {activeDropdownFolderId === folder.id && (
-                <div className="folder-card-dropdown" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className="dropdown-item"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveDropdownFolderId(null);
-                      handleOpenEditModal(folder);
-                    }}
-                  >
-                    Chỉnh sửa
-                  </button>
-                  <button
-                    className="dropdown-item delete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveDropdownFolderId(null);
-                      handleDeleteFolder(folder.id);
-                    }}
-                  >
-                    Xóa
-                  </button>
+                {/* Options dropdown menu */}
+                {activeDropdownFolderId === folder.id && (
+                  <div className="folder-card-dropdown" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="dropdown-item"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDropdownFolderId(null);
+                        handleOpenEditModal(folder);
+                      }}
+                    >
+                      Chỉnh sửa
+                    </button>
+                    <button
+                      className="dropdown-item delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveDropdownFolderId(null);
+                        handleDeleteFolder(folder.id);
+                      }}
+                    >
+                      Xóa
+                    </button>
+                  </div>
+                )}
+
+                <div className="folder-icon">
+                  <FolderIcon />
                 </div>
-              )}
+                <div className="folder-info">
+                  <h4>{folder.name}</h4>
+                </div>
+              </div>
+            ))}
+          </div>
 
-              <div className="folder-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 24 24" fill="#fff5f7" stroke="#ff89a9" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z" />
-                </svg>
-              </div>
-              <div className="folder-info">
-                <h4>{folder.name}</h4>
-              </div>
+          {totalPages > 1 && (
+            <div className="pagination-container">
+              <button
+                className="btn-page"
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Trước
+              </button>
+              <span className="page-info">Trang {page + 1} / {totalPages}</span>
+              <button
+                className="btn-page"
+                disabled={page >= totalPages - 1}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Sau
+              </button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       ) : (
         <div className="empty-list">
           {searchQuery

@@ -143,8 +143,10 @@
   margin: 0 0 4px 0;
   color: #5a4b5e;
   font-size: 15px;
-  word-break: break-word;
-  overflow-wrap: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
 }
 
 .folder-info p {

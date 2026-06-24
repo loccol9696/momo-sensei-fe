@@ -96,7 +96,7 @@
 /* --- DANH SÁCH HỌC PHẦN (6 CỘT) --- */
 .modules-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 16px;
   flex: 1;
   padding-top: 6px;
@@ -139,10 +139,18 @@
   height: 40px !important;
 }
 
+.module-info {
+  width: 100%;
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+
 .module-info h4 {
   margin: 0 0 4px 0;
   color: #5a4b5e;
   font-size: 15px;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .module-info p {
@@ -313,7 +321,7 @@
   }
 
   .modules-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -332,13 +340,13 @@
   }
 
   .modules-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 480px) {
   .modules-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

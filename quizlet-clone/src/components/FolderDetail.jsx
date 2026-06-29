@@ -23,6 +23,8 @@ const FolderDetail = () => {
   const [newModuleDesc, setNewModuleDesc] = useState("");
   const [newModulePermission, setNewModulePermission] = useState("PUBLIC");
   const [newModulePassword, setNewModulePassword] = useState("");
+  const [newModuleType, setNewModuleType] = useState("VOCABULARY");
+
 
   // State Modal chỉnh sửa Module
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -110,6 +112,7 @@ const FolderDetail = () => {
     setNewModuleDesc("");
     setNewModulePermission("PUBLIC");
     setNewModulePassword("");
+    setNewModuleType("VOCABULARY");
   };
 
   const handleCreateModule = async (e) => {
@@ -127,7 +130,9 @@ const FolderDetail = () => {
         description: newModuleDesc,
         permission: newModulePermission,
         password: newModulePermission === "PASSWORD" ? newModulePassword : null,
+        moduleType: newModuleType,
       };
+
 
       const response = await axios.post(
         `/api/folders/${id}/modules`,
@@ -154,6 +159,7 @@ const FolderDetail = () => {
     setNewModuleDesc(mod.description || "");
     setNewModulePermission(mod.permission || "PUBLIC");
     setNewModulePassword(""); // Do not pre-fill passwords
+    setNewModuleType(mod.moduleType || "VOCABULARY");
     setIsEditModalOpen(true);
   };
 
@@ -172,7 +178,9 @@ const FolderDetail = () => {
         description: newModuleDesc,
         permission: newModulePermission,
         password: newModulePermission === "PASSWORD" ? newModulePassword : null,
+        moduleType: newModuleType,
       };
+
 
       const response = await axios.put(
         `/api/modules/${editingModule.id}`,
@@ -260,6 +268,7 @@ const FolderDetail = () => {
                 className="module-card"
                 onClick={() => navigate(`/modules/${mod.id}`)}
               >
+
                 {/* Ellipsis options trigger button (visible on hover) */}
                 <button
                   className="module-card-options-btn"
@@ -298,30 +307,66 @@ const FolderDetail = () => {
                 )}
 
                 <div className="module-icon">
-                  <svg
-                    width="42"
-                    height="42"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="svg-module-icon"
-                  >
-                    <path
-                      d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z"
-                      fill="#fff5f7"
-                      stroke="#ff89a9"
-                    />
-                    <path d="M14 2v6h6" stroke="#ff89a9" />
-                    <line x1="16" y1="13" x2="8" y2="13" stroke="#ff89a9" />
-                    <line x1="16" y1="17" x2="8" y2="17" stroke="#ff89a9" />
-                    <line x1="10" y1="9" x2="8" y2="9" stroke="#ff89a9" />
-                  </svg>
+                  {mod.moduleType === "KANJI" ? (
+                    <svg
+                      width="42"
+                      height="42"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="svg-module-icon"
+                    >
+                      <path
+                        d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z"
+                        fill="#fff0f5"
+                        stroke="#ff6b9e"
+                      />
+                      <path d="M14 2v6h6" stroke="#ff6b9e" />
+                      <text
+                        x="12"
+                        y="16.5"
+                        fontSize="8.5"
+                        fontWeight="bold"
+                        fill="#ff6b9e"
+                        textAnchor="middle"
+                        fontFamily="var(--font-japanese, 'Noto Sans JP', sans-serif)"
+                      >
+                        漢
+                      </text>
+                    </svg>
+                  ) : (
+                    <svg
+                      width="42"
+                      height="42"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="svg-module-icon"
+                    >
+                      <path
+                        d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6z"
+                        fill="#fff5f7"
+                        stroke="#ff89a9"
+                      />
+                      <path d="M14 2v6h6" stroke="#ff89a9" />
+                      <line x1="16" y1="13" x2="8" y2="13" stroke="#ff89a9" />
+                      <line x1="16" y1="17" x2="8" y2="17" stroke="#ff89a9" />
+                      <line x1="10" y1="9" x2="8" y2="9" stroke="#ff89a9" />
+                    </svg>
+                  )}
                 </div>
                 <div className="module-info">
                   <h4>{mod.name}</h4>
                   <p>{mod.totalCards || mod.totalTerms || 0} thuật ngữ</p>
+                  <div style={{ marginTop: "6px" }}>
+                    <span className={`module-type-badge ${mod.moduleType === "KANJI" ? "kanji" : "vocab"}`}>
+                      {mod.moduleType === "KANJI" ? "Kanji" : "Từ vựng"}
+                    </span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -386,6 +431,17 @@ const FolderDetail = () => {
                   onChange={(e) => setNewModuleDesc(e.target.value)}
                   spellCheck={false}
                 />
+              </div>
+              <div className="module-form-group">
+                <label className="module-form-label">Loại học phần</label>
+                <select
+                  className="module-form-select"
+                  value={newModuleType}
+                  onChange={(e) => setNewModuleType(e.target.value)}
+                >
+                  <option value="VOCABULARY">Học từ vựng</option>
+                  <option value="KANJI">Học kanji</option>
+                </select>
               </div>
               <div className="module-form-group">
                 <label className="module-form-label">Quyền truy cập (*)</label>
@@ -466,6 +522,18 @@ const FolderDetail = () => {
                   onChange={(e) => setNewModuleDesc(e.target.value)}
                   spellCheck={false}
                 />
+              </div>
+              <div className="module-form-group">
+                <label className="module-form-label">Loại học phần</label>
+                <select
+                  className="module-form-select"
+                  value={newModuleType}
+                  onChange={(e) => setNewModuleType(e.target.value)}
+                  disabled={true}
+                >
+                  <option value="VOCABULARY">Tiêu chuẩn (Từ vựng/Định nghĩa)</option>
+                  <option value="KANJI">Học Kanji</option>
+                </select>
               </div>
               <div className="module-form-group">
                 <label className="module-form-label">Quyền truy cập (*)</label>

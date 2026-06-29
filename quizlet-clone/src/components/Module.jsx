@@ -96,6 +96,124 @@ const CopyIcon = ({ size = "1.2em" }) => (
   </svg>
 );
 
+const cleanJapaneseText = (text) => {
+  if (!text) return "";
+  const parts = text.split(/[-:：]/);
+  return parts[0].trim();
+};
+
+const playSuccessSound = () => {
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    
+    // Play two quick high-pitched dings (tic tic)
+    const playBeep = (time, pitch, duration) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(pitch, time);
+      
+      gain.gain.setValueAtTime(0.08, time);
+      // Exponential decay
+      gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start(time);
+      osc.stop(time + duration);
+    };
+    
+    const now = ctx.currentTime;
+    // Tic 1
+    playBeep(now, 1200, 0.08);
+    // Tic 2
+    playBeep(now + 0.08, 1500, 0.12);
+  } catch (e) {
+    console.error("Failed to play success sound", e);
+  }
+};
+
+const KanjiStrokeAnimator = ({ kanji }) => {
+  const [svgContent, setSvgContent] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [key, setKey] = useState(0);
+
+  useEffect(() => {
+    if (!kanji) {
+      setSvgContent("");
+      return;
+    }
+
+    setLoading(true);
+    fetch(`/api/kanji/stroke?char=${encodeURIComponent(kanji)}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Character not found");
+        return res.text();
+      })
+      .then((text) => {
+        const cleanedText = text.replace(/<!--[\s\S]*?-->/g, "");
+        setSvgContent(cleanedText);
+        setLoading(false);
+        setKey(0); // reset key on character change
+      })
+      .catch((err) => {
+        console.error("Failed to load stroke order SVG:", err);
+        setSvgContent("");
+        setLoading(false);
+      });
+  }, [kanji]);
+
+  // Handle automatic looping
+  useEffect(() => {
+    if (!svgContent) return;
+
+    // Parse the SVG content to find the maximum delay
+    const regex = /--d:\s*(\d+(?:\.\d+)?)\s*s/g;
+    const matches = [...svgContent.matchAll(regex)];
+    const delays = matches.map(m => parseFloat(m[1]));
+    const maxDelay = delays.length > 0 ? Math.max(...delays) : 0;
+
+    // Stroke duration is typically 0.8s. We wait 0.8s for the last stroke to finish,
+    // plus a 2.5s pause at the end before repeating.
+    const strokeDuration = 0.8;
+    const pauseDuration = 2.5;
+    const totalCycleTimeMs = (maxDelay + strokeDuration + pauseDuration) * 1000;
+
+    const timer = setTimeout(() => {
+      setKey((prev) => prev + 1);
+    }, totalCycleTimeMs);
+
+    return () => clearTimeout(timer);
+  }, [svgContent, key]);
+
+  const handleReplay = (e) => {
+    e.stopPropagation();
+    setKey((prev) => prev + 1);
+  };
+
+  if (loading) {
+    return <div className="kanji-animator-loading">...</div>;
+  }
+
+  if (!svgContent) {
+    return <div className="kanji-static-text">{kanji}</div>;
+  }
+
+  return (
+    <div
+      key={key}
+      className="kanji-stroke-animator"
+      onClick={handleReplay}
+      title="Nhấn để vẽ lại"
+      dangerouslySetInnerHTML={{ __html: svgContent }}
+    />
+  );
+};
+
 const Module = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -150,6 +268,25 @@ const Module = () => {
   const [editDefinition, setEditDefinition] = useState("");
   const [editImageUrl, setEditImageUrl] = useState("");
 
+  // Kanji specific states (New Card)
+  const [newKanji, setNewKanji] = useState("");
+  const [newHanViet, setNewHanViet] = useState("");
+  const [newHanVietMeaning, setNewHanVietMeaning] = useState("");
+  const [newOnyomi, setNewOnyomi] = useState("");
+  const [newKunyomi, setNewKunyomi] = useState("");
+  const [newMnemonic, setNewMnemonic] = useState("");
+  const [newExamples, setNewExamples] = useState("");
+
+  // Kanji specific states (Edit Card)
+  const [editKanji, setEditKanji] = useState("");
+  const [editHanViet, setEditHanViet] = useState("");
+  const [editHanVietMeaning, setEditHanVietMeaning] = useState("");
+  const [editOnyomi, setEditOnyomi] = useState("");
+  const [editKunyomi, setEditKunyomi] = useState("");
+  const [editMnemonic, setEditMnemonic] = useState("");
+  const [editExamples, setEditExamples] = useState("");
+
+
   // State Sửa chung & Sắp xếp thẻ (Bulk Edit & Reorder)
   const [isBulkEditMode, setIsBulkEditMode] = useState(false);
   const [bulkCards, setBulkCards] = useState([]);
@@ -167,6 +304,8 @@ const Module = () => {
   const [isStudyConfigOpen, setIsStudyConfigOpen] = useState(false);
   const [studyMode, setStudyMode] = useState("write"); // "choice" | "write"
   const [studyStarredOnly, setStudyStarredOnly] = useState(false);
+  const [studyShowType, setStudyShowType] = useState("definition"); // "definition" | "term"
+  const [studyDifficulty, setStudyDifficulty] = useState("hard"); // "easy" | "hard"
 
   const [isStudying, setIsStudying] = useState(false);
   const [studyQuestions, setStudyQuestions] = useState([]);
@@ -188,6 +327,7 @@ const Module = () => {
     incorrect: 0,
     wrongQuestions: []
   });
+  const [studyStreak, setStudyStreak] = useState(0);
 
   // Trạng thái trò chơi trực tiếp (Match Game inline)
   const [isGameConfigOpen, setIsGameConfigOpen] = useState(false);
@@ -387,6 +527,7 @@ const Module = () => {
 
   // Tự động phát âm thanh khi chuyển thẻ hoặc lật thẻ sang mặt tiếng Nhật
   useEffect(() => {
+    if (moduleData?.moduleType === "KANJI") return;
     if (isStudying || isPlayingGame) return;
     if (slideState !== "none") return; // Ngăn tiếng khi đang chạy hiệu ứng trượt chuyển thẻ
 
@@ -771,7 +912,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}`,
+        `/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}&showType=${studyShowType}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -786,6 +927,7 @@ const Module = () => {
           incorrect: 0,
           wrongQuestions: []
         });
+        setStudyStreak(0);
         setStudyStep("playing");
         setIsStudying(true);
         setIsStudyConfigOpen(false);
@@ -815,7 +957,9 @@ const Module = () => {
         "/api/study/check",
         {
           cardId: currentQuestion.cardId,
-          userAnswer: answer
+          userAnswer: answer,
+          showType: studyShowType,
+          difficulty: studyDifficulty
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -833,6 +977,8 @@ const Module = () => {
 
         if (answerCorrect) {
           setStudyStats((prev) => ({ ...prev, correct: prev.correct + 1 }));
+          setStudyStreak((prev) => prev + 1);
+          playSuccessSound();
         } else {
           setStudyStats((prev) => ({
             ...prev,
@@ -847,6 +993,7 @@ const Module = () => {
               }
             ]
           }));
+          setStudyStreak(0);
         }
       }
     } catch (err) {
@@ -879,7 +1026,7 @@ const Module = () => {
     try {
       const token = localStorage.getItem("token");
       const response = await axios.get(
-        `/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}`,
+        `/api/study/${studyMode}/${id}?isStarred=${studyStarredOnly}&showType=${studyShowType}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -896,6 +1043,7 @@ const Module = () => {
           incorrect: 0,
           wrongQuestions: []
         });
+        setStudyStreak(0);
         setStudyStep("playing");
         setIsStudying(true);
       }
@@ -926,6 +1074,7 @@ const Module = () => {
       incorrect: 0,
       wrongQuestions: []
     });
+    setStudyStreak(0);
     setStudyStep("playing");
     setIsStudying(true);
   };
@@ -2172,31 +2321,65 @@ const Module = () => {
 
   const handleCreateCard = async (e) => {
     e.preventDefault();
-    if (!newTerm.trim() || !newDefinition.trim()) {
-      return toast.warning("Thuật ngữ và định nghĩa không được để trống!");
-    }
-
+    const token = localStorage.getItem("token");
     setIsCreatingCard(true);
     try {
-      const token = localStorage.getItem("token");
-      await axios.post(
-        `/api/modules/${id}/cards`,
-        { term: newTerm, definition: newDefinition, imageUrl: newImageUrl },
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-
-      toast.success("Thêm thẻ thành công!");
-      setNewTerm("");
-      setNewDefinition("");
-      setNewImageUrl("");
+      if (moduleData?.moduleType === "KANJI") {
+        if (!newKanji.trim() || !newHanViet.trim()) {
+          toast.warning("Chữ Kanji và âm Hán Việt không được để trống!");
+          setIsCreatingCard(false);
+          return;
+        }
+        await axios.post(
+          `/api/modules/${id}/cards`,
+          {
+            term: newKanji,
+            definition: newHanVietMeaning ? `${newHanViet} (${newHanVietMeaning})` : newHanViet,
+            imageUrl: newImageUrl,
+            kanji: newKanji,
+            hanViet: newHanViet,
+            hanVietMeaning: newHanVietMeaning,
+            onyomi: newOnyomi.split('\n').map(on => on.trim()).filter(on => on !== "").join('\n'),
+            kunyomi: newKunyomi.split('\n').map(kun => kun.trim()).filter(kun => kun !== "").join('\n'),
+            mnemonic: newMnemonic,
+            examples: newExamples.split('\n').map(ex => ex.trim()).filter(ex => ex !== "").join('\n')
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success("Thêm thẻ Kanji thành công!");
+        setNewKanji("");
+        setNewHanViet("");
+        setNewHanVietMeaning("");
+        setNewOnyomi("");
+        setNewKunyomi("");
+        setNewMnemonic("");
+        setNewExamples("");
+        setNewImageUrl("");
+      } else {
+        if (!newTerm.trim() || !newDefinition.trim()) {
+          toast.warning("Thuật ngữ và định nghĩa không được để trống!");
+          setIsCreatingCard(false);
+          return;
+        }
+        await axios.post(
+          `/api/modules/${id}/cards`,
+          { term: newTerm, definition: newDefinition, imageUrl: newImageUrl },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        toast.success("Thêm thẻ thành công!");
+        setNewTerm("");
+        setNewDefinition("");
+        setNewImageUrl("");
+      }
       setIsCreateCardModalOpen(false);
       fetchModule();
     } catch (err) {
-      toast.error("Lỗi khi tạo thẻ.");
+      toast.error(err.response?.data?.message || "Lỗi khi tạo thẻ.");
     } finally {
       setIsCreatingCard(false);
     }
   };
+
 
   const handleImportCards = async (e) => {
     e.preventDefault();
@@ -2243,35 +2426,69 @@ const Module = () => {
     setEditTerm(card.term);
     setEditDefinition(card.definition);
     setEditImageUrl(card.imageUrl || "");
+
+    // Kanji fields
+    setEditKanji(card.kanji || "");
+    setEditHanViet(card.hanViet || "");
+    setEditHanVietMeaning(card.hanVietMeaning || "");
+    setEditOnyomi(card.onyomi || "");
+    setEditKunyomi(card.kunyomi || "");
+    setEditMnemonic(card.mnemonic || "");
+    setEditExamples(card.examples || "");
+
     setIsEditCardModalOpen(true);
   };
 
   const handleUpdateCard = async (e) => {
     e.preventDefault();
-    if (!editTerm.trim() || !editDefinition.trim()) {
-      return toast.warning("Thuật ngữ và định nghĩa không được để trống!");
-    }
-
+    const token = localStorage.getItem("token");
     setIsUpdatingCard(true);
     try {
-      const token = localStorage.getItem("token");
-      const response = await axios.put(
-        `/api/cards/${editingCardId}`,
-        { term: editTerm, definition: editDefinition, imageUrl: editImageUrl },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      if (response.data.success) {
-        toast.success("Cập nhật thẻ thành công!");
-        setIsEditCardModalOpen(false);
-        fetchModule();
+      if (moduleData?.moduleType === "KANJI") {
+        if (!editKanji.trim() || !editHanViet.trim()) {
+          toast.warning("Chữ Kanji và âm Hán Việt không được để trống!");
+          setIsUpdatingCard(false);
+          return;
+        }
+        await axios.put(
+          `/api/cards/${editingCardId}`,
+          {
+            term: editKanji,
+            definition: editHanVietMeaning ? `${editHanViet} (${editHanVietMeaning})` : editHanViet,
+            imageUrl: editImageUrl,
+            kanji: editKanji,
+            hanViet: editHanViet,
+            hanVietMeaning: editHanVietMeaning,
+            onyomi: editOnyomi.split('\n').map(on => on.trim()).filter(on => on !== "").join('\n'),
+            kunyomi: editKunyomi.split('\n').map(kun => kun.trim()).filter(kun => kun !== "").join('\n'),
+            mnemonic: editMnemonic,
+            examples: editExamples.split('\n').map(ex => ex.trim()).filter(ex => ex !== "").join('\n')
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+      } else {
+        if (!editTerm.trim() || !editDefinition.trim()) {
+          toast.warning("Thuật ngữ và định nghĩa không được để trống!");
+          setIsUpdatingCard(false);
+          return;
+        }
+        await axios.put(
+          `/api/cards/${editingCardId}`,
+          { term: editTerm, definition: editDefinition, imageUrl: editImageUrl },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
       }
+
+      toast.success("Cập nhật thẻ thành công!");
+      setIsEditCardModalOpen(false);
+      fetchModule();
     } catch (err) {
       toast.error(err.response?.data?.message || "Lỗi khi cập nhật thẻ.");
     } finally {
       setIsUpdatingCard(false);
     }
   };
+
 
   const handleDeleteCard = async (cardId) => {
     if (!window.confirm("Cậu có chắc muốn xóa thẻ này không?")) return;
@@ -2590,7 +2807,14 @@ const Module = () => {
             <div className="study-progress-section">
               <div className="study-progress-info">
                 <span>Câu hỏi {studyCurrentIndex + 1} / {studyQuestions.length}</span>
-                <span className="study-score-mini">Đúng: {studyStats.correct} | Sai: {studyStats.incorrect}</span>
+                <span className="study-score-mini">
+                  Đúng: {studyStats.correct} | Sai: {studyStats.incorrect}
+                  {studyStreak > 0 && (
+                    <span className="study-streak-badge">
+                      🔥 {studyStreak}
+                    </span>
+                  )}
+                </span>
               </div>
               <div className="study-progress-bar-bg">
                 <div className="study-progress-bar-fill" style={{ width: `${progressPercent}%` }}></div>
@@ -2600,7 +2824,7 @@ const Module = () => {
             <div className="question-play-card">
               {/* Question Text */}
               <div className="question-display-header">
-                <span className="q-label">ĐỊNH NGHĨA</span>
+                <span className="q-label">{studyShowType === "term" ? "THUẬT NGỮ" : "ĐỊNH NGHĨA"}</span>
                 <div className="question-text-wrapper" style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
                   <h1 className="question-text">{currentQuestion.question}</h1>
                 </div>
@@ -2930,10 +3154,200 @@ const Module = () => {
     }
   }
 
+  const renderFlashcardContent = (card) => {
+    if (moduleData?.moduleType === "KANJI") {
+      return (
+        <div className="flashcard-face flashcard-kanji-only">
+          <button
+            className={`btn-flashcard-star ${(card?.isStarred || card?.starred) ? "starred" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleStar(card.id);
+            }}
+            title={(card?.isStarred || card?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
+          >
+            ★
+          </button>
+
+          <div className="kanji-card-layout">
+            <div className="kanji-card-top">
+              <div className="kanji-main-info-box">
+                <div className="kanji-sino-vietnamese">
+                  <div className="kanji-index-hviet">
+                    <span className="kanji-hviet-text">{card?.hanViet}</span>
+                  </div>
+                  <div className="kanji-hviet-meaning">
+                    ({card?.hanVietMeaning})
+                  </div>
+                </div>
+
+                <div className="kanji-character-box">
+                  <KanjiStrokeAnimator kanji={card?.kanji} />
+                </div>
+
+                <div className="kanji-yomi-box">
+                  <div className="kanji-onyomi">
+                    {card?.onyomi?.split('\n').map((item, key) => (
+                      <span key={key}>{item}<br /></span>
+                    ))}
+                  </div>
+                  <div className="kanji-yomi-divider"></div>
+                  <div className="kanji-kunyomi">
+                    {card?.kunyomi?.split('\n').map((item, key) => (
+                      <span key={key}>{item}<br /></span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {card?.imageUrl && (
+                <div className="kanji-stroke-image-box">
+                  <img src={card.imageUrl} alt="Stroke order" className="kanji-stroke-image" />
+                </div>
+              )}
+            </div>
+
+            {card?.mnemonic && (
+              <div className="kanji-mnemonic-box">
+                <strong>Cách nhớ:</strong> {card.mnemonic}
+              </div>
+            )}
+
+            {card?.examples && (
+              <div className="kanji-examples-grid">
+                {card.examples.split('\n').map((ex, idx) => {
+                  const cleaned = cleanJapaneseText(ex);
+                  return (
+                    <div key={idx} className="kanji-example-item">
+                      <span>{ex}</span>
+                      {cleaned && (
+                        <button
+                          className="btn-example-audio"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playTts(cleaned, "ja");
+                          }}
+                          title="Phát âm"
+                        >
+                          <AudioIcon size="1.15em" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className={`flashcard ${isFlipped ? "flipped" : ""} ${(slideState !== "none" || noFlipTransition) ? "no-transition" : ""}`}>
+        {/* FRONT FACE */}
+        <div className="flashcard-face flashcard-front">
+          <button
+            className={`btn-flashcard-star ${(card?.isStarred || card?.starred) ? "starred" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleStar(card.id);
+            }}
+            title={(card?.isStarred || card?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
+          >
+            ★
+          </button>
+          {showFirst === "term" ? (
+            <>
+              <button
+                className="btn-flashcard-audio"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  playTts(card?.term, "ja");
+                }}
+                title="Phát âm tiếng Nhật"
+              >
+                <AudioIcon size="1.2em" />
+              </button>
+              <button
+                className="btn-flashcard-copy"
+                style={{ left: "74px" }}
+                onClick={(e) => handleCopyText(e, card?.term)}
+                title="Sao chép từ vựng"
+              >
+                <CopyIcon size="1.2em" />
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn-flashcard-copy"
+              style={{ left: "20px" }}
+              onClick={(e) => handleCopyText(e, card?.definition)}
+              title="Sao chép định nghĩa"
+            >
+              <CopyIcon size="1.2em" />
+            </button>
+          )}
+          <div className="card-text">
+            {showFirst === "term" ? card?.term : card?.definition}
+          </div>
+        </div>
+
+        {/* BACK FACE */}
+        <div className="flashcard-face flashcard-back">
+          <button
+            className={`btn-flashcard-star ${(card?.isStarred || card?.starred) ? "starred" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleToggleStar(card.id);
+            }}
+            title={(card?.isStarred || card?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
+          >
+            ★
+          </button>
+          {showFirst === "definition" ? (
+            <>
+              <button
+                className="btn-flashcard-audio"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  playTts(card?.term, "ja");
+                }}
+                title="Phát âm tiếng Nhật"
+              >
+                <AudioIcon size="1.2em" />
+              </button>
+              <button
+                className="btn-flashcard-copy"
+                style={{ left: "74px" }}
+                onClick={(e) => handleCopyText(e, card?.term)}
+                title="Sao chép từ vựng"
+              >
+                <CopyIcon size="1.2em" />
+              </button>
+            </>
+          ) : (
+            <button
+              className="btn-flashcard-copy"
+              style={{ left: "20px" }}
+              onClick={(e) => handleCopyText(e, card?.definition)}
+              title="Sao chép định nghĩa"
+            >
+              <CopyIcon size="1.2em" />
+            </button>
+          )}
+          <div className="card-text">
+            {showFirst === "term" ? card?.definition : card?.term}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const currentCard =
     studyCards.length > 0
       ? studyCards[currentIndex]
       : null;
+
 
 
   if (isFullScreen && studyCards.length > 0) {
@@ -2964,106 +3378,10 @@ const Module = () => {
 
           <div className="flashcard-wrapper fullscreen-wrapper">
             <div
-              className={`flashcard-container fullscreen-container ${slideState !== "none" ? slideState : ""}`}
-              onClick={handleFlip}
+              className={`flashcard-container fullscreen-container ${moduleData?.moduleType === "KANJI" ? "kanji-card-container" : ""} ${slideState !== "none" ? slideState : ""}`}
+              onClick={moduleData?.moduleType === "KANJI" ? undefined : handleFlip}
             >
-              <div className={`flashcard ${isFlipped ? "flipped" : ""} ${(slideState !== "none" || noFlipTransition) ? "no-transition" : ""}`}>
-                {/* FRONT FACE */}
-                <div className="flashcard-face flashcard-front">
-                  <button
-                    className={`btn-flashcard-star ${(currentCard?.isStarred || currentCard?.starred) ? "starred" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleToggleStar(currentCard.id);
-                    }}
-                    title={(currentCard?.isStarred || currentCard?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
-                  >
-                    ★
-                  </button>
-                  {showFirst === "term" ? (
-                    <>
-                      <button
-                        className="btn-flashcard-audio"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playTts(currentCard?.term, "ja");
-                        }}
-                        title="Phát âm tiếng Nhật"
-                      >
-                        <AudioIcon size="1.2em" />
-                      </button>
-                      <button
-                        className="btn-flashcard-copy"
-                        style={{ left: "74px" }}
-                        onClick={(e) => handleCopyText(e, currentCard?.term)}
-                        title="Sao chép từ vựng"
-                      >
-                        <CopyIcon size="1.2em" />
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="btn-flashcard-copy"
-                      style={{ left: "20px" }}
-                      onClick={(e) => handleCopyText(e, currentCard?.definition)}
-                      title="Sao chép định nghĩa"
-                    >
-                      <CopyIcon size="1.2em" />
-                    </button>
-                  )}
-                  <div className="card-text">
-                    {showFirst === "term" ? currentCard?.term : currentCard?.definition}
-                  </div>
-                </div>
-
-                {/* BACK FACE */}
-                <div className="flashcard-face flashcard-back">
-                  <button
-                    className={`btn-flashcard-star ${(currentCard?.isStarred || currentCard?.starred) ? "starred" : ""}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleToggleStar(currentCard.id);
-                    }}
-                    title={(currentCard?.isStarred || currentCard?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
-                  >
-                    ★
-                  </button>
-                  {showFirst === "definition" ? (
-                    <>
-                      <button
-                        className="btn-flashcard-audio"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          playTts(currentCard?.term, "ja");
-                        }}
-                        title="Phát âm tiếng Nhật"
-                      >
-                        <AudioIcon size="1.2em" />
-                      </button>
-                      <button
-                        className="btn-flashcard-copy"
-                        style={{ left: "74px" }}
-                        onClick={(e) => handleCopyText(e, currentCard?.term)}
-                        title="Sao chép từ vựng"
-                      >
-                        <CopyIcon size="1.2em" />
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="btn-flashcard-copy"
-                      style={{ left: "20px" }}
-                      onClick={(e) => handleCopyText(e, currentCard?.definition)}
-                      title="Sao chép định nghĩa"
-                    >
-                      <CopyIcon size="1.2em" />
-                    </button>
-                  )}
-                  <div className="card-text">
-                    {showFirst === "term" ? currentCard?.definition : currentCard?.term}
-                  </div>
-                </div>
-              </div>
+              {renderFlashcardContent(currentCard)}
             </div>
           </div>
 
@@ -3260,15 +3578,17 @@ const Module = () => {
         <div className="module-header-info">
           <h2 className="module-title">{moduleData.name}</h2>
           <p className="module-desc">{moduleData.description}</p>
-          <div className="module-mode-selector">
-            <button className="btn-mode active">Thẻ ghi nhớ</button>
-            <button className="btn-mode" onClick={() => setIsStudyConfigOpen(true)}>
-              Chế độ học
-            </button>
-            <button className="btn-mode" onClick={() => setIsGameConfigOpen(true)}>
-              Trò chơi
-            </button>
-          </div>
+          {moduleData?.moduleType !== "KANJI" && (
+            <div className="module-mode-selector">
+              <button className="btn-mode active">Thẻ ghi nhớ</button>
+              <button className="btn-mode" onClick={() => setIsStudyConfigOpen(true)}>
+                Chế độ học
+              </button>
+              <button className="btn-mode" onClick={() => setIsGameConfigOpen(true)}>
+                Trò chơi
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -3279,101 +3599,11 @@ const Module = () => {
         <>
           {studyCards.length > 0 ? (
             <div className="flashcard-wrapper">
-              <div className={`flashcard-container ${slideState !== "none" ? slideState : ""}`} onClick={handleFlip}>
-                <div className={`flashcard ${isFlipped ? "flipped" : ""} ${(slideState !== "none" || noFlipTransition) ? "no-transition" : ""}`}>
-                  <div className="flashcard-face flashcard-front">
-                    <button
-                      className={`btn-flashcard-star ${(currentCard?.isStarred || currentCard?.starred) ? "starred" : ""}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleStar(currentCard.id);
-                      }}
-                      title={(currentCard?.isStarred || currentCard?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
-                    >
-                      ★
-                    </button>
-                    {showFirst === "term" ? (
-                      <>
-                        <button
-                          className="btn-flashcard-audio"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            playTts(currentCard?.term, "ja");
-                          }}
-                          title="Phát âm tiếng Nhật"
-                        >
-                          <AudioIcon size="1.2em" />
-                        </button>
-                        <button
-                          className="btn-flashcard-copy"
-                          style={{ left: "74px" }}
-                          onClick={(e) => handleCopyText(e, currentCard?.term)}
-                          title="Sao chép từ vựng"
-                        >
-                          <CopyIcon size="1.2em" />
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="btn-flashcard-copy"
-                        style={{ left: "20px" }}
-                        onClick={(e) => handleCopyText(e, currentCard?.definition)}
-                        title="Sao chép định nghĩa"
-                      >
-                        <CopyIcon size="1.2em" />
-                      </button>
-                    )}
-                    <div className="card-text">
-                      {showFirst === "term" ? currentCard?.term : currentCard?.definition}
-                    </div>
-                  </div>
-                  <div className="flashcard-face flashcard-back">
-                    <button
-                      className={`btn-flashcard-star ${(currentCard?.isStarred || currentCard?.starred) ? "starred" : ""}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleStar(currentCard.id);
-                      }}
-                      title={(currentCard?.isStarred || currentCard?.starred) ? "Bỏ gắn sao" : "Gắn sao"}
-                    >
-                      ★
-                    </button>
-                    {showFirst === "definition" ? (
-                      <>
-                        <button
-                          className="btn-flashcard-audio"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            playTts(currentCard?.term, "ja");
-                          }}
-                          title="Phát âm tiếng Nhật"
-                        >
-                          <AudioIcon size="1.2em" />
-                        </button>
-                        <button
-                          className="btn-flashcard-copy"
-                          style={{ left: "74px" }}
-                          onClick={(e) => handleCopyText(e, currentCard?.term)}
-                          title="Sao chép từ vựng"
-                        >
-                          <CopyIcon size="1.2em" />
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        className="btn-flashcard-copy"
-                        style={{ left: "20px" }}
-                        onClick={(e) => handleCopyText(e, currentCard?.definition)}
-                        title="Sao chép định nghĩa"
-                      >
-                        <CopyIcon size="1.2em" />
-                      </button>
-                    )}
-                    <div className="card-text">
-                      {showFirst === "term" ? currentCard?.definition : currentCard?.term}
-                    </div>
-                  </div>
-                </div>
+              <div
+                className={`flashcard-container ${moduleData?.moduleType === "KANJI" ? "kanji-card-container" : ""} ${slideState !== "none" ? slideState : ""}`}
+                onClick={moduleData?.moduleType === "KANJI" ? undefined : handleFlip}
+              >
+                {renderFlashcardContent(currentCard)}
               </div>
             </div>
           ) : (
@@ -3564,24 +3794,29 @@ const Module = () => {
                 </>
               ) : (
                 <>
-                  <button
-                    className="btn-bulk-edit-toggle"
-                    onClick={handleStartBulkEdit}
-                  >
-                    Chỉnh sửa
-                  </button>
-                  <button
-                    className="btn-import-cards"
-                    onClick={() => setIsImportModalOpen(true)}
-                  >
-                    Nhập thẻ
-                  </button>
+                  {moduleData?.moduleType !== "KANJI" && (
+                    <>
+                      <button
+                        className="btn-bulk-edit-toggle"
+                        onClick={handleStartBulkEdit}
+                      >
+                        Chỉnh sửa
+                      </button>
+                      <button
+                        className="btn-import-cards"
+                        onClick={() => setIsImportModalOpen(true)}
+                      >
+                        Nhập thẻ
+                      </button>
+                    </>
+                  )}
                   <button
                     className="btn-add-card"
                     onClick={() => setIsCreateCardModalOpen(true)}
                   >
                     Thêm thẻ
                   </button>
+
                 </>
               )
             )}
@@ -3659,24 +3894,83 @@ const Module = () => {
         ) : (
           <div className="cards-list">
             {activeCards.map((card, index) => (
-              <div key={card.id} className="card-list-item">
+              <div key={card.id} className={`card-list-item ${moduleData?.moduleType === "KANJI" ? "kanji-list-item" : ""}`}>
                 <div className="card-list-index">{index + 1}</div>
-                <div className="card-list-content">
-                  <div className="card-list-text-col">
-                    <div className="card-list-term">{card.term}</div>
-                    <button
-                      className="btn-inline-audio"
-                      onClick={() => playTts(card.term, "ja")}
-                      title="Phát âm tiếng Nhật"
-                    >
-                      <AudioIcon size="1.1em" />
-                    </button>
+                {moduleData?.moduleType === "KANJI" ? (
+                  <div className="card-list-content kanji-list-content">
+                    <div className="kanji-list-char-block">
+                      <span className="kanji-list-char">{card.kanji}</span>
+                      <span className="kanji-list-hviet">{card.hanViet}</span>
+                      <span className="kanji-list-meaning">({card.hanVietMeaning})</span>
+                    </div>
+
+                    <div className="card-list-divider"></div>
+
+                    <div className="kanji-list-yomi-block">
+                      <div><strong>On:</strong> <span>{card.onyomi?.replace(/\n/g, ', ')}</span></div>
+                      <div><strong>Kun:</strong> <span>{card.kunyomi?.replace(/\n/g, ', ')}</span></div>
+                    </div>
+
+                    <div className="card-list-divider"></div>
+
+                    <div className="kanji-list-details-block">
+                      {card.mnemonic && <div><strong>Cách nhớ:</strong> {card.mnemonic}</div>}
+                      {card.examples && (
+                        <div className="kanji-list-examples">
+                          <strong>Ví dụ:</strong>
+                          <div className="kanji-list-examples-container">
+                            {card.examples.split('\n').map((ex, idx) => {
+                              const cleaned = cleanJapaneseText(ex);
+                              return (
+                                <div key={idx} className="kanji-list-example-item">
+                                  <span className="list-example-text">{ex}</span>
+                                  {cleaned && (
+                                    <button
+                                      className="btn-example-audio"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        playTts(cleaned, "ja");
+                                      }}
+                                      title="Phát âm"
+                                    >
+                                      <AudioIcon size="0.9em" />
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {card.imageUrl && (
+                      <>
+                        <div className="card-list-divider"></div>
+                        <div className="kanji-list-image-block">
+                          <img src={card.imageUrl} alt="Stroke order" className="kanji-list-stroke" />
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="card-list-divider"></div>
-                  <div className="card-list-text-col">
-                    <div className="card-list-def">{card.definition}</div>
+                ) : (
+                  <div className="card-list-content">
+                    <div className="card-list-text-col">
+                      <div className="card-list-term">{card.term}</div>
+                      <button
+                        className="btn-inline-audio"
+                        onClick={() => playTts(card.term, "ja")}
+                        title="Phát âm tiếng Nhật"
+                      >
+                        <AudioIcon size="1.1em" />
+                      </button>
+                    </div>
+                    <div className="card-list-divider"></div>
+                    <div className="card-list-text-col">
+                      <div className="card-list-def">{card.definition}</div>
+                    </div>
                   </div>
-                </div>
+                )}
                 <div className="card-list-actions">
                   <button
                     className={`btn-card-action btn-card-star ${(card.isStarred || card.starred) ? "starred" : ""}`}
@@ -3798,6 +4092,52 @@ const Module = () => {
                   <span className="toggle-slider"></span>
                 </label>
               </div>
+
+              <div className="study-config-option" style={{ flexDirection: "column", alignItems: "stretch", gap: "10px", borderTop: "1px solid #fff0f5", paddingTop: "15px", marginTop: "20px" }}>
+                <div className="study-config-info">
+                  <span className="study-config-label">Hiển thị câu hỏi bằng</span>
+                </div>
+                <div className="segment-control" style={{ marginTop: "5px" }}>
+                  <button
+                    type="button"
+                    className={`segment-btn ${studyShowType === "definition" ? "active" : ""}`}
+                    onClick={() => setStudyShowType("definition")}
+                  >
+                    Định nghĩa
+                  </button>
+                  <button
+                    type="button"
+                    className={`segment-btn ${studyShowType === "term" ? "active" : ""}`}
+                    onClick={() => setStudyShowType("term")}
+                  >
+                    Thuật ngữ
+                  </button>
+                </div>
+              </div>
+
+              {studyMode === "write" && (
+                <div className="study-config-option" style={{ flexDirection: "column", alignItems: "stretch", gap: "10px", borderTop: "1px solid #fff0f5", paddingTop: "15px", marginTop: "20px" }}>
+                  <div className="study-config-info">
+                    <span className="study-config-label">Mức độ khó</span>
+                  </div>
+                  <div className="segment-control" style={{ marginTop: "5px" }}>
+                    <button
+                      type="button"
+                      className={`segment-btn ${studyDifficulty === "easy" ? "active" : ""}`}
+                      onClick={() => setStudyDifficulty("easy")}
+                    >
+                      Đơn giản (Khớp 1 phần)
+                    </button>
+                    <button
+                      type="button"
+                      className={`segment-btn ${studyDifficulty === "hard" ? "active" : ""}`}
+                      onClick={() => setStudyDifficulty("hard")}
+                    >
+                      Khó (Khớp hoàn toàn)
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="module-modal-actions" style={{ marginTop: "25px" }}>
@@ -3941,31 +4281,231 @@ const Module = () => {
           >
             <h3 className="module-modal-title">Thêm Thẻ</h3>
             <form onSubmit={handleCreateCard}>
-              <div className="module-form-group">
-                <label>Thuật ngữ (*)</label>
-                <input
-                  className="module-form-input"
-                  value={newTerm}
-                  onChange={(e) => setNewTerm(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div className="module-form-group">
-                <label>Định nghĩa (*)</label>
-                <textarea
-                  className="module-form-textarea"
-                  value={newDefinition}
-                  onChange={(e) => setNewDefinition(e.target.value)}
-                />
-              </div>
-              <div className="module-form-group">
-                <label>Ảnh (URL)</label>
-                <input
-                  className="module-form-input"
-                  value={newImageUrl}
-                  onChange={(e) => setNewImageUrl(e.target.value)}
-                />
-              </div>
+              {moduleData?.moduleType === "KANJI" ? (
+                <>
+                  <div className="module-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px" }}>
+                    <div className="module-form-group">
+                      <label>Chữ Kanji (*)</label>
+                      <input
+                        className="module-form-input"
+                        value={newKanji}
+                        onChange={(e) => setNewKanji(e.target.value)}
+                        placeholder="Từ vựng "
+                        autoFocus
+                      />
+                    </div>
+                    <div className="module-form-group">
+                      <label>Âm Hán Việt (*)</label>
+                      <input
+                        className="module-form-input"
+                        value={newHanViet}
+                        onChange={(e) => setNewHanViet(e.target.value)}
+                        placeholder="VD: CUNG"
+                      />
+                    </div>
+                  </div>
+                  <div className="module-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "15px" }}>
+                    <div className="module-form-group">
+                      <label>Nghĩa Hán Việt</label>
+                      <input
+                        className="module-form-input"
+                        value={newHanVietMeaning}
+                        onChange={(e) => setNewHanVietMeaning(e.target.value)}
+                        placeholder="VD: cung cấp"
+                      />
+                    </div>
+                    <div className="module-form-group">
+                      <label>Cách nhớ</label>
+                      <input
+                        className="module-form-input"
+                        value={newMnemonic}
+                        onChange={(e) => setNewMnemonic(e.target.value)}
+                        placeholder="VD: Người làm công có nghĩa vụ cung cấp..."
+                      />
+                    </div>
+                  </div>
+                  <div className="module-form-group">
+                    <label>Kunyomi</label>
+                    <div className="example-grid-container">
+                      {(() => {
+                        const list = newKunyomi ? newKunyomi.split('\n') : [""];
+                        return (
+                          <>
+                            {list.map((ex, idx) => (
+                              <div key={idx} className="example-grid-item">
+                                <input
+                                  type="text"
+                                  className="example-grid-input"
+                                  value={ex}
+                                  onChange={(e) => {
+                                    const updated = [...list];
+                                    updated[idx] = e.target.value;
+                                    setNewKunyomi(updated.join('\n'));
+                                  }}
+                                  placeholder="Âm KUN"
+                                />
+                                {list.length > 1 && (
+                                  <button
+                                    type="button"
+                                    className="btn-remove-grid-item"
+                                    onClick={() => {
+                                      const updated = list.filter((_, i) => i !== idx);
+                                      setNewKunyomi(updated.join('\n'));
+                                    }}
+                                    title="Xóa"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              className="btn-add-grid-item"
+                              onClick={() => {
+                                setNewKunyomi([...list, ""].join('\n'));
+                              }}
+                              title="Thêm âm KUN"
+                            >
+                              +
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="module-form-group">
+                    <label>Onyomi</label>
+                    <div className="example-grid-container">
+                      {(() => {
+                        const list = newOnyomi ? newOnyomi.split('\n') : [""];
+                        return (
+                          <>
+                            {list.map((ex, idx) => (
+                              <div key={idx} className="example-grid-item">
+                                <input
+                                  type="text"
+                                  className="example-grid-input"
+                                  value={ex}
+                                  onChange={(e) => {
+                                    const updated = [...list];
+                                    updated[idx] = e.target.value;
+                                    setNewOnyomi(updated.join('\n'));
+                                  }}
+                                  placeholder="Âm ON"
+                                />
+                                {list.length > 1 && (
+                                  <button
+                                    type="button"
+                                    className="btn-remove-grid-item"
+                                    onClick={() => {
+                                      const updated = list.filter((_, i) => i !== idx);
+                                      setNewOnyomi(updated.join('\n'));
+                                    }}
+                                    title="Xóa"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              className="btn-add-grid-item"
+                              onClick={() => {
+                                setNewOnyomi([...list, ""].join('\n'));
+                              }}
+                              title="Thêm âm ON"
+                            >
+                              +
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="module-form-group">
+                    <label>Từ vựng</label>
+                    <div className="example-grid-container">
+                      {(() => {
+                        const list = newExamples ? newExamples.split('\n') : [""];
+                        return (
+                          <>
+                            {list.map((ex, idx) => (
+                              <div key={idx} className="example-grid-item">
+                                <input
+                                  type="text"
+                                  className="example-grid-input"
+                                  value={ex}
+                                  onChange={(e) => {
+                                    const updated = [...list];
+                                    updated[idx] = e.target.value;
+                                    setNewExamples(updated.join('\n'));
+                                  }}
+                                  placeholder="Từ Vựng"
+                                />
+                                {list.length > 1 && (
+                                  <button
+                                    type="button"
+                                    className="btn-remove-grid-item"
+                                    onClick={() => {
+                                      const updated = list.filter((_, i) => i !== idx);
+                                      setNewExamples(updated.join('\n'));
+                                    }}
+                                    title="Xóa"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              className="btn-add-grid-item"
+                              onClick={() => {
+                                setNewExamples([...list, ""].join('\n'));
+                              }}
+                              title="Thêm từ vựng/ví dụ"
+                            >
+                              +
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="module-form-group">
+                    <label>Thuật ngữ (*)</label>
+                    <input
+                      className="module-form-input"
+                      value={newTerm}
+                      onChange={(e) => setNewTerm(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="module-form-group">
+                    <label>Định nghĩa (*)</label>
+                    <textarea
+                      className="module-form-textarea"
+                      value={newDefinition}
+                      onChange={(e) => setNewDefinition(e.target.value)}
+                    />
+                  </div>
+                  <div className="module-form-group">
+                    <label>Ảnh (URL)</label>
+                    <input
+                      className="module-form-input"
+                      value={newImageUrl}
+                      onChange={(e) => setNewImageUrl(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
               <div className="module-modal-actions">
                 <button
                   type="button"
@@ -4074,31 +4614,231 @@ const Module = () => {
           >
             <h3 className="module-modal-title">Chỉnh sửa thẻ</h3>
             <form onSubmit={handleUpdateCard}>
-              <div className="module-form-group">
-                <label className="module-form-label">Thuật ngữ (*)</label>
-                <input
-                  className="module-form-input"
-                  value={editTerm}
-                  onChange={(e) => setEditTerm(e.target.value)}
-                  autoFocus
-                />
-              </div>
-              <div className="module-form-group">
-                <label className="module-form-label">Định nghĩa (*)</label>
-                <textarea
-                  className="module-form-textarea"
-                  value={editDefinition}
-                  onChange={(e) => setEditDefinition(e.target.value)}
-                />
-              </div>
-              <div className="module-form-group">
-                <label className="module-form-label">Ảnh (URL)</label>
-                <input
-                  className="module-form-input"
-                  value={editImageUrl}
-                  onChange={(e) => setEditImageUrl(e.target.value)}
-                />
-              </div>
+              {moduleData?.moduleType === "KANJI" ? (
+                <>
+                  <div className="module-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px" }}>
+                    <div className="module-form-group">
+                      <label>Chữ Kanji (*)</label>
+                      <input
+                        className="module-form-input"
+                        value={editKanji}
+                        onChange={(e) => setEditKanji(e.target.value)}
+                        placeholder="Từ vựng "
+                        autoFocus
+                      />
+                    </div>
+                    <div className="module-form-group">
+                      <label>Âm Hán Việt (*)</label>
+                      <input
+                        className="module-form-input"
+                        value={editHanViet}
+                        onChange={(e) => setEditHanViet(e.target.value)}
+                        placeholder="VD: CUNG"
+                      />
+                    </div>
+                  </div>
+                  <div className="module-form-row" style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "15px" }}>
+                    <div className="module-form-group">
+                      <label>Nghĩa Hán Việt</label>
+                      <input
+                        className="module-form-input"
+                        value={editHanVietMeaning}
+                        onChange={(e) => setEditHanVietMeaning(e.target.value)}
+                        placeholder="VD: cung cấp"
+                      />
+                    </div>
+                    <div className="module-form-group">
+                      <label>Cách nhớ</label>
+                      <input
+                        className="module-form-input"
+                        value={editMnemonic}
+                        onChange={(e) => setEditMnemonic(e.target.value)}
+                        placeholder="VD: Người làm công có nghĩa vụ cung cấp..."
+                      />
+                    </div>
+                  </div>
+                  <div className="module-form-group">
+                    <label>Kunyomi</label>
+                    <div className="example-grid-container">
+                      {(() => {
+                        const list = editKunyomi ? editKunyomi.split('\n') : [""];
+                        return (
+                          <>
+                            {list.map((ex, idx) => (
+                              <div key={idx} className="example-grid-item">
+                                <input
+                                  type="text"
+                                  className="example-grid-input"
+                                  value={ex}
+                                  onChange={(e) => {
+                                    const updated = [...list];
+                                    updated[idx] = e.target.value;
+                                    setEditKunyomi(updated.join('\n'));
+                                  }}
+                                  placeholder="Âm KUN"
+                                />
+                                {list.length > 1 && (
+                                  <button
+                                    type="button"
+                                    className="btn-remove-grid-item"
+                                    onClick={() => {
+                                      const updated = list.filter((_, i) => i !== idx);
+                                      setEditKunyomi(updated.join('\n'));
+                                    }}
+                                    title="Xóa"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              className="btn-add-grid-item"
+                              onClick={() => {
+                                setEditKunyomi([...list, ""].join('\n'));
+                              }}
+                              title="Thêm âm KUN"
+                            >
+                              +
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="module-form-group">
+                    <label>Onyomi</label>
+                    <div className="example-grid-container">
+                      {(() => {
+                        const list = editOnyomi ? editOnyomi.split('\n') : [""];
+                        return (
+                          <>
+                            {list.map((ex, idx) => (
+                              <div key={idx} className="example-grid-item">
+                                <input
+                                  type="text"
+                                  className="example-grid-input"
+                                  value={ex}
+                                  onChange={(e) => {
+                                    const updated = [...list];
+                                    updated[idx] = e.target.value;
+                                    setEditOnyomi(updated.join('\n'));
+                                  }}
+                                  placeholder="Âm ON"
+                                />
+                                {list.length > 1 && (
+                                  <button
+                                    type="button"
+                                    className="btn-remove-grid-item"
+                                    onClick={() => {
+                                      const updated = list.filter((_, i) => i !== idx);
+                                      setEditOnyomi(updated.join('\n'));
+                                    }}
+                                    title="Xóa"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              className="btn-add-grid-item"
+                              onClick={() => {
+                                setEditOnyomi([...list, ""].join('\n'));
+                              }}
+                              title="Thêm âm ON"
+                            >
+                              +
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+
+                  <div className="module-form-group">
+                    <label>Từ vựng</label>
+                    <div className="example-grid-container">
+                      {(() => {
+                        const list = editExamples ? editExamples.split('\n') : [""];
+                        return (
+                          <>
+                            {list.map((ex, idx) => (
+                              <div key={idx} className="example-grid-item">
+                                <input
+                                  type="text"
+                                  className="example-grid-input"
+                                  value={ex}
+                                  onChange={(e) => {
+                                    const updated = [...list];
+                                    updated[idx] = e.target.value;
+                                    setEditExamples(updated.join('\n'));
+                                  }}
+                                  placeholder="Từ Vựng"
+                                />
+                                {list.length > 1 && (
+                                  <button
+                                    type="button"
+                                    className="btn-remove-grid-item"
+                                    onClick={() => {
+                                      const updated = list.filter((_, i) => i !== idx);
+                                      setEditExamples(updated.join('\n'));
+                                    }}
+                                    title="Xóa"
+                                  >
+                                    &times;
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              className="btn-add-grid-item"
+                              onClick={() => {
+                                setEditExamples([...list, ""].join('\n'));
+                              }}
+                              title="Thêm từ vựng"
+                            >
+                              +
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="module-form-group">
+                    <label className="module-form-label">Thuật ngữ (*)</label>
+                    <input
+                      className="module-form-input"
+                      value={editTerm}
+                      onChange={(e) => setEditTerm(e.target.value)}
+                      autoFocus
+                    />
+                  </div>
+                  <div className="module-form-group">
+                    <label className="module-form-label">Định nghĩa (*)</label>
+                    <textarea
+                      className="module-form-textarea"
+                      value={editDefinition}
+                      onChange={(e) => setEditDefinition(e.target.value)}
+                    />
+                  </div>
+                  <div className="module-form-group">
+                    <label className="module-form-label">Ảnh (URL)</label>
+                    <input
+                      className="module-form-input"
+                      value={editImageUrl}
+                      onChange={(e) => setEditImageUrl(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
               <div className="module-modal-actions">
                 <button
                   type="button"
